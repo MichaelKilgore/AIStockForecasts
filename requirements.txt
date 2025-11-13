@@ -1,0 +1,6 @@
+pandas
+alpaca
+python-dotenv
+boto3
+pyarrow
+pytorch-forecasting
