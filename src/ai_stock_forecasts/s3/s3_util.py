@@ -29,61 +29,65 @@ class S3ParquetUtil:
 
     def get_features_data(self, symbols: list[str], features: list[str], time_frame: TimeFrame=TimeFrame.Day) -> list[HistoricalData]:
         res = []
-        for symbol in symbols:
-            for feature in features:
-                prefix = f"{self.prefix}/symbol={symbol}/feature={feature}/time_frame={time_frame.unit_value.value}/"
+        for feature in features:
+            print(f"pulling feature data for feature: {feature}, time_frame: {time_frame.unit_value.value}")
+            prefix = f"{self.prefix}/feature={feature}/time_frame={time_frame.unit_value.value}/"
 
-                continuation_token = None
-                while True:
-                    list_kwargs = {
-                        "Bucket": self.bucket,
-                        "Prefix": prefix,
-                    }
-                    if continuation_token is not None:
-                        list_kwargs["ContinuationToken"] = continuation_token
+            continuation_token = None
+            while True:
+                list_kwargs = {
+                    "Bucket": self.bucket,
+                    "Prefix": prefix,
+                }
+                if continuation_token is not None:
+                    list_kwargs["ContinuationToken"] = continuation_token
 
-                    response = self.s3.list_objects_v2(**list_kwargs)
+                response = self.s3.list_objects_v2(**list_kwargs)
 
-                    contents = response.get("Contents", [])
-                    if not contents:
-                        break
+                contents = response.get("Contents", [])
+                if not contents:
+                    break
 
-                    for obj in contents:
-                        key = obj["Key"]
-                        if not key.endswith(".parquet"):
-                            continue
+                for obj in contents:
+                    key = obj["Key"]
+                    if not key.endswith(".parquet"):
+                        continue
 
-                        obj_resp = self.s3.get_object(Bucket=self.bucket, Key=key)
-                        data = obj_resp["Body"].read()
+                    print(f"s3 get_object: {key}")
+                    obj_resp = self.s3.get_object(Bucket=self.bucket, Key=key)
+                    data = obj_resp["Body"].read()
 
-                        df = pd.read_parquet(io.BytesIO(data))
+                    df = pd.read_parquet(io.BytesIO(data))
 
-                        for _, row in df.iterrows():
-                            res.append(
-                                HistoricalData(
-                                    symbol=row.get("symbol", symbol),
-                                    timestamp=row["timestamp"],
-                                    feature=row.get("feature", feature),
-                                    value=row["value"],
-                                    type=row.get("type", "float"),
-                                    updated_timestamp=row["updated_timestamp"],
-                                    time_frame=time_frame,
-                                    date=row["date"],
-                                )
+                    print(f"appending results to final res for s3 key: {key}")
+                    for row in df.itertuples(index=False):
+                        res.append(
+                            HistoricalData(
+                                symbol=row.symbol,
+                                timestamp=row.timestamp,
+                                feature=row.feature,
+                                value=row.value,
+                                type=row.type,
+                                updated_timestamp=row.updated_timestamp,
+                                time_frame=time_frame,
+                                date=row.date,
                             )
+                        )
 
-                    if response.get("IsTruncated"):
-                        continuation_token = response.get("NextContinuationToken")
-                    else:
-                        break
+                if response.get("IsTruncated"):
+                    continuation_token = response.get("NextContinuationToken")
+                else:
+                    break
 
-        return res
+        filtered_res = [r for r in res if r.symbol in symbols]
+
+        return filtered_res
 
 
     def upload_features_data(self, records: list[HistoricalData], time_frame: TimeFrame=TimeFrame.Day):
         records_by_partitions: dict[str, list[HistoricalData]] = defaultdict(list)
         for r in records:
-            partitions = r.symbol + r.feature + r.time_frame.unit_value.value
+            partitions = r.feature + r.time_frame.unit_value.value
             records_by_partitions[partitions].append(r)
 
         for key, recs in records_by_partitions.items():
@@ -95,7 +99,7 @@ class S3ParquetUtil:
             buffer.seek(0)
 
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-            key = f"{self.prefix}/symbol={recs[0].symbol}/feature={recs[0].feature}/time_frame={time_frame.unit_value.value}/historical_data_{ts}.parquet"
+            key = f"{self.prefix}/feature={recs[0].feature}/time_frame={time_frame.unit_value.value}/historical_data_{ts}.parquet"
 
             self.s3.put_object(
                 Bucket=self.bucket,

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 import pandas as pd
-import numpy as np
+import argparse
 from alpaca.data import TimeFrame
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_forecasting import NaNLabelEncoder
@@ -42,22 +42,62 @@ class Orchestration:
         self.val_dataloader = validation_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
 
 
-    def train(self):
+    def train(self,
+              learning_rate: float = 1e-4,
+              hidden_size: int = 32,
+              attention_head_size: int = 4,
+              dropout: float = 0.1,
+              hidden_continuous_size: int = 16,
+              lstm_layers: int = 1,
+              reduce_on_plateau_patience: int = 3,
+              max_epochs: int = 50,
+              accelerator: str = "cpu",
+              devices: str = 1):
         loss = QuantileLoss(quantiles=[0.3, 0.5, 0.7])
 
+        """ hidden_size = core model width, number of hidden units used in LSTM encoder/decoder and the gating/mixing layers inside TFT
+                            typical values: 16, 32, 64, 128
+                            higher = more expressive but slower and easier to overfit.
+                            increase when running on beefer gpu / cpu
+            attention_head_size = the number of attention heads
+                            more heads means model can learn multiple types of temporal relationships in parallel
+                            typical values: 1, 4, 8
+                            higher = increases model expressiveness, smaller datasets prefer 1-4 heads
+                            increase based on increase in data
+                            chatgpt recommendation:
+                                <50k rows <20 symbols = 1
+                                50-500k rows 20-200 symbols = 2-4
+                                500k rows 200-500 symbols = 4-8
+                                5 million rows 1000 symbols = 8
+            dropout = probability of dropping units during training to prevent overfitting.
+                            typical values = 0.0-0.3
+                            higher = more regularization
+                            lower = more capacity, more risk of overfitting
+            hidden_continuous_size = size in which data is compressed to.
+                            typical values = 8, 16, 32
+                            small = may compress too aggressively
+                            large = more expressive, but slower and more prone to overfitting
+            lstm_layers = number of stacked lstm layers
+                            typical values = 1 or 2
+                            more layers = deeper sequence modeling, higher compute and harder to train
+                            mor ethan 2 rarely helps
+            reduce_on_plateau_patience = how many validation epochs without improvement before the learning rate is reduced.
+                            typical values 2 - 5
+                            
+        """
         self.model = TemporalFusionTransformer.from_dataset(
             self.dataset,
-            learning_rate=1e-4,
-            hidden_size=16,
-            attention_head_size=4,
-            dropout=0.1,
+            learning_rate=learning_rate,
+            hidden_size=hidden_size,
+            attention_head_size=attention_head_size,
+            dropout=dropout,
             loss=loss,
             output_size=len(loss.quantiles),
-            hidden_continuous_size=16,
-            lstm_layers=2,
+            hidden_continuous_size=hidden_continuous_size,
+            lstm_layers=lstm_layers,
             log_interval=10,
             log_val_interval=1,
-            reduce_on_plateau_patience=3,
+            reduce_on_plateau_patience=reduce_on_plateau_patience,
         )
 
         early_stop = EarlyStopping(
@@ -75,7 +115,7 @@ class Orchestration:
             filename="tft-best-{epoch:02d}-{val_loss:.4f}",
         )
 
-        trainer = Trainer(max_epochs=10, accelerator="cpu", callbacks=[early_stop, checkpoint])
+        trainer = Trainer(max_epochs=max_epochs, accelerator=accelerator, devices=devices, callbacks=[early_stop, checkpoint])
         trainer.fit(self.model, train_dataloaders=self.train_dataloader, val_dataloaders=self.val_dataloader)
 
         trainer.save_checkpoint("tft_model.ckpt")
@@ -136,12 +176,53 @@ class Orchestration:
         df.to_csv("val_predictions.csv", index=False)
         print(df.head())
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--hidden_size", type=int, default=32)
+    parser.add_argument("--attention_head_size", type=int, default=4)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--hidden_continuous_size", type=int, default=16)
+    parser.add_argument("--lstm_layers", type=int, default=1)
+    parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--max_epochs", type=int, default=50)
+
+    parser.add_argument("--train_start", type=str, default="2019-01-02")
+    parser.add_argument("--train_end", type=str, default="2024-01-01")
+    parser.add_argument("--val_start", type=str, default="2024-01-02")
+    parser.add_argument("--val_end", type=str, default="2025-01-01")
+
+    parser.add_argument("--max_lookback_period", type=int, default=1000)
+    parser.add_argument("--max_prediction_length", type=int, default=14)
+
+    parser.add_argument("--symbols_path", type=str, default="../constants/symbols.txt")
+
+    parser.add_argument("--accelerator", type=str, default="cpu")
+    parser.add_argument("--devices", type=str, default=1)
+
+    return parser.parse_args()
+
 if __name__ == "__main__":
+    args = parse_args()
+
+    with open(args.symbols_path, "r") as f:
+        symbols = [line.strip() for line in f]
+
     orchestration = Orchestration()
-    orchestration.load_dataset(["GOOGL", "AAPL"], ["open"], datetime(2019, 1, 2, tzinfo=timezone.utc), datetime(2024, 1, 1, tzinfo=timezone.utc),
-                               datetime(2024, 1, 2, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc),
-                               1000, 14,
+    features = ['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap']
+    # features = ['open']
+
+    train_start = datetime.fromisoformat(args.train_start).replace(tzinfo=timezone.utc)
+    train_end = datetime.fromisoformat(args.train_end).replace(tzinfo=timezone.utc)
+    val_start = datetime.fromisoformat(args.val_start).replace(tzinfo=timezone.utc)
+    val_end = datetime.fromisoformat(args.val_end).replace(tzinfo=timezone.utc)
+
+    orchestration.load_dataset(symbols, features,
+                                train_start, train_end,
+                               val_start, val_end,
+                               args.max_lookback_period, args.max_prediction_length,
                                TimeFrame.Day)
-    # orchestration.train()
-    orchestration.load_trained_model()
-    orchestration.save_predictions()
+    orchestration.train(args.learning_rate, args.hidden_size, args.attention_head_size, args.dropout, args.hidden_continuous_size,
+                        args.lstm_layers, 3, args.max_epochs, args.accelerator, args.devices)
+    # orchestration.load_trained_model()
+    # orchestration.save_predictions()
