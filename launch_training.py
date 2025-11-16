@@ -21,7 +21,7 @@ estimator = PyTorch(
     role=role,
     framework_version="2.8",
     py_version="py312",
-    instance_type="ml.g4dn.xlarge",
+    instance_type="ml.g4dn.2xlarge",
     instance_count=1,
     hyperparameters={
         "hidden_size": 32,

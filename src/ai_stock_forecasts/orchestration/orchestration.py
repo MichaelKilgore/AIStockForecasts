@@ -29,7 +29,7 @@ class Orchestration:
                      train_start: datetime, train_end: datetime,
                      validation_start: datetime, validation_end: datetime,
                      max_lookback_period: int, max_prediction_length: int,
-                     time_frame: TimeFrame=TimeFrame.Day):
+                     time_frame: TimeFrame=TimeFrame.Day, accelerator: str = "cpu"):
         self.features_data = self.s3_util.get_features_data(symbols, features, time_frame)
 
         pivoted = self.construct_time_series_dataset_util.build_pivoted_with_time_idx(
@@ -57,7 +57,8 @@ class Orchestration:
         )
 
         batch_size = 64
-        self.train_dataloader = self.dataset.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
+        use_gpu = accelerator in ("gpu", "cuda")
+        self.train_dataloader = self.dataset.to_dataloader(train=True, batch_size=batch_size, num_workers=2, pin_memory=use_gpu)
 
         training_cutoff = train_df["time_idx"].max()
         val_source = pivoted[pivoted["timestamp"] <= validation_end].copy()
@@ -71,7 +72,7 @@ class Orchestration:
 
         print(validation_dataset)
 
-        self.val_dataloader = validation_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
+        self.val_dataloader = validation_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=2, pin_memory=use_gpu)
 
 
     def train(self,
@@ -147,10 +148,13 @@ class Orchestration:
             filename="tft-best-{epoch:02d}-{val_loss:.4f}",
         )
 
-        trainer = Trainer(max_epochs=max_epochs, accelerator=accelerator, devices=devices, callbacks=[early_stop, checkpoint])
+        trainer = Trainer(max_epochs=max_epochs,
+                          accelerator=accelerator,
+                          devices=devices,
+                          callbacks=[early_stop, checkpoint])
         trainer.fit(self.model, train_dataloaders=self.train_dataloader, val_dataloaders=self.val_dataloader)
 
-        trainer.save_checkpoint("tft_model.ckpt")
+        trainer.save_checkpoint("/opt/ml/model/tft_model.ckpt")
 
     def load_trained_model(self, path: str="tft_model.ckpt"):
         self.model = TemporalFusionTransformer.load_from_checkpoint(path)
@@ -253,7 +257,7 @@ if __name__ == "__main__":
                                 train_start, train_end,
                                val_start, val_end,
                                args.max_lookback_period, args.max_prediction_length,
-                               TimeFrame.Day)
+                               TimeFrame.Day, args.accelerator)
     orchestration.train(args.learning_rate, args.hidden_size, args.attention_head_size, args.dropout, args.hidden_continuous_size,
                         args.lstm_layers, 3, args.max_epochs, args.accelerator, args.devices)
     # orchestration.load_trained_model()
