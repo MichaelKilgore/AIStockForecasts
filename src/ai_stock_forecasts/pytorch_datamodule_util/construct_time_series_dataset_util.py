@@ -11,6 +11,13 @@ class ConstructTimeSeriesDatasetUtil:
     def __init__(self):
        self.known_features = ["timestamp"]
 
+    def build_pivoted_with_time_idx(self, data: list[HistoricalData]):
+        df = pd.DataFrame([vars(r) for r in data])
+        pivoted = self._pivot_features(df)
+        pivoted = pivoted.sort_values(["symbol", "timestamp"])
+        pivoted["time_idx"] = pivoted.groupby("symbol").cumcount().astype("int64")
+        return pivoted
+
     def get_time_series_dataset(self, data: list[HistoricalData], start: datetime, end: datetime, max_lookback_period: int, max_prediction_length: int, symbol_encoder):
         df = pd.DataFrame([vars(r) for r in data])
         filtered = df[(df["timestamp"] >= start) & (df["timestamp"] <= end)]
@@ -24,7 +31,10 @@ class ConstructTimeSeriesDatasetUtil:
         pivoted_data = pivoted_data.sort_values(["symbol", "timestamp"])
         pivoted_data["time_idx"] = pivoted_data.groupby("symbol").cumcount().astype("int64")
 
-        return TimeSeriesDataSet.from_dataset(train_dataset, pivoted_data, stop_randomization=True)
+        training_cutoff = train_dataset.index.time.max()
+        min_prediction_idx = training_cutoff + 1
+
+        return TimeSeriesDataSet.from_dataset(train_dataset, pivoted_data, stop_randomization=True, min_prediction_idx=min_prediction_idx)
 
     def _convert_historical_data_to_time_series_dataset(self, df: DataFrame, max_lookback_period: int, max_prediction_length: int, symbol_encoder):
         pivoted_data = self._pivot_features(df)

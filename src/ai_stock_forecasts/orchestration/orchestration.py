@@ -4,7 +4,7 @@ import pandas as pd
 import argparse
 from alpaca.data import TimeFrame
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_forecasting import NaNLabelEncoder
+from pytorch_forecasting import NaNLabelEncoder, TimeSeriesDataSet
 
 from ai_stock_forecasts.pytorch_datamodule_util.construct_time_series_dataset_util import \
     ConstructTimeSeriesDatasetUtil
@@ -32,13 +32,45 @@ class Orchestration:
                      time_frame: TimeFrame=TimeFrame.Day):
         self.features_data = self.s3_util.get_features_data(symbols, features, time_frame)
 
+        pivoted = self.construct_time_series_dataset_util.build_pivoted_with_time_idx(
+            self.features_data
+        )
+        train_mask = (pivoted["timestamp"] >= train_start) & (pivoted["timestamp"] <= train_end)
+        train_df = pivoted[train_mask].copy()
+
         self.symbol_encoder = NaNLabelEncoder().fit(pd.Series(symbols))
-        self.dataset = self.construct_time_series_dataset_util.get_time_series_dataset(self.features_data, train_start, train_end, max_lookback_period, max_prediction_length, self.symbol_encoder)
+        self.dataset = TimeSeriesDataSet(
+            train_df,
+            time_idx="time_idx",
+            group_ids=["symbol"],
+            time_varying_known_reals=self.construct_time_series_dataset_util._get_known_features(
+                pd.DataFrame([vars(r) for r in self.features_data])
+            ),
+            time_varying_unknown_reals=self.construct_time_series_dataset_util._get_unknown_features(
+                pd.DataFrame([vars(r) for r in self.features_data])
+            ),
+            max_encoder_length=max_lookback_period,
+            max_prediction_length=max_prediction_length,
+            target="open",
+            allow_missing_timesteps=True,
+            categorical_encoders={"symbol": self.symbol_encoder},
+        )
 
         batch_size = 64
         self.train_dataloader = self.dataset.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
 
-        validation_dataset = self.construct_time_series_dataset_util.get_validation_time_series_dataset(self.dataset, self.features_data, train_start, validation_end)
+        training_cutoff = train_df["time_idx"].max()
+        val_source = pivoted[pivoted["timestamp"] <= validation_end].copy()
+
+        validation_dataset = TimeSeriesDataSet.from_dataset(
+            self.dataset,
+            val_source,
+            min_prediction_idx=training_cutoff + 1,
+            stop_randomization=True,
+        )
+
+        print(validation_dataset)
+
         self.val_dataloader = validation_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
 
 
