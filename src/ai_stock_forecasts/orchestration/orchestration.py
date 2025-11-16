@@ -6,9 +6,9 @@ from alpaca.data import TimeFrame
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_forecasting import NaNLabelEncoder
 
-from src.ai_stock_forecasts.pytorch_datamodule_util.construct_time_series_dataset_util import \
+from ai_stock_forecasts.pytorch_datamodule_util.construct_time_series_dataset_util import \
     ConstructTimeSeriesDatasetUtil
-from src.ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
 
 from pytorch_forecasting.models import TemporalFusionTransformer
 from lightning.pytorch import Trainer

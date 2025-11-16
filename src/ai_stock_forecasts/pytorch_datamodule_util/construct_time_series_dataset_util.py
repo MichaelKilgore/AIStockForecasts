@@ -5,7 +5,7 @@ from alpaca.data import TimeFrame
 from pandas import DataFrame
 from pytorch_forecasting.data.timeseries._timeseries import TimeSeriesDataSet
 
-from src.ai_stock_forecasts.models.historical_data import HistoricalData
+from ai_stock_forecasts.models.historical_data import HistoricalData
 
 class ConstructTimeSeriesDatasetUtil:
     def __init__(self):

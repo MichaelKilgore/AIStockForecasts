@@ -7,7 +7,7 @@ import pandas as pd
 from datetime import datetime, timezone
 from collections import defaultdict
 
-from src.ai_stock_forecasts.models.historical_data import HistoricalData
+from ai_stock_forecasts.models.historical_data import HistoricalData
 
 class S3ParquetUtil:
     def __init__(self):

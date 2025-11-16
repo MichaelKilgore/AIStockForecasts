@@ -5,8 +5,8 @@ import os
 from alpaca.data import StockHistoricalDataClient, TimeFrame
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
 
-from src.ai_stock_forecasts.models.stock import Stock
-from src.ai_stock_forecasts.models.stock_bar import StockBar
+from ai_stock_forecasts.models.stock import Stock
+from ai_stock_forecasts.models.stock_bar import StockBar
 
 
 class GetHistoricalDataUtil:
