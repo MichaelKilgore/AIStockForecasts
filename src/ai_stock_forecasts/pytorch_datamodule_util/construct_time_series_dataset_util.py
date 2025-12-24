@@ -14,8 +14,10 @@ class ConstructTimeSeriesDatasetUtil:
     def build_pivoted_with_time_idx(self, data: list[HistoricalData]):
         df = pd.DataFrame([vars(r) for r in data])
         pivoted = self._pivot_features(df)
-        pivoted = pivoted.sort_values(["symbol", "timestamp"])
-        pivoted["time_idx"] = pivoted.groupby("symbol").cumcount().astype("int64")
+        #pivoted = pivoted.sort_values(["symbol", "timestamp"])
+        #pivoted["time_idx"] = pivoted.groupby("symbol").cumcount().astype("int64")
+        pivoted = pivoted.sort_values(["timestamp", "symbol"])
+        pivoted["time_idx"] = pd.factorize(pivoted["timestamp"])[0].astype("int64")
         return pivoted
 
     def get_time_series_dataset(self, data: list[HistoricalData], start: datetime, end: datetime, max_lookback_period: int, max_prediction_length: int, symbol_encoder):
