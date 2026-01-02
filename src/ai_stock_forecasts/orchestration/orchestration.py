@@ -3,14 +3,14 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import argparse
-from alpaca.data import TimeFrame
+from alpaca.data import TimeFrame, TimeFrameUnit
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_forecasting import NaNLabelEncoder, TimeSeriesDataSet
 import torch
 import json
 from torch.utils.data import DataLoader
 
-from ai_stock_forecasts.utils.plot_utils import plot_different_forecast_strategies_profits
+from ai_stock_forecasts.utils.plot_utils import plot_arr, plot_different_forecast_strategies_profits
 from ai_stock_forecasts.pytorch_datamodule_util.construct_time_series_dataset_util import \
     ConstructTimeSeriesDatasetUtil
 from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
@@ -19,6 +19,11 @@ from pytorch_forecasting.models import TemporalFusionTransformer
 from lightning.pytorch import Trainer
 from pytorch_forecasting.metrics import QuantileLoss
 from lightning.pytorch.callbacks import Callback
+
+from math import sqrt
+from scipy.stats import norm
+
+import matplotlib.pyplot as plt
 
 class StepPrint(Callback):
     def __init__(self, every=50): self.every = every
@@ -65,6 +70,7 @@ class Orchestration:
                 pd.DataFrame([vars(r) for r in self.features_data])
             ),
             max_encoder_length=max_lookback_period,
+            # it may be worth setting min_encoder_length to less (by default min_encoder_length=max_prediction_length), smaller min_encoder_length means more samples
             max_prediction_length=max_prediction_length,
             target="open",
             allow_missing_timesteps=True,
@@ -76,6 +82,7 @@ class Orchestration:
 
         training_cutoff = train_df["time_idx"].max()
         val_source = self.pivoted[self.pivoted["timestamp"] <= validation_end].copy()
+        print(f"training cutoff: {train_df["timestamp"].max()}")
 
         validation_dataset = TimeSeriesDataSet.from_dataset(
             self.dataset,
@@ -83,8 +90,20 @@ class Orchestration:
             min_prediction_idx=training_cutoff + 1,
             stop_randomization=True,
         )
+        val_cutoff = val_source["time_idx"].max()
+        print(f"val cutoff: {val_source["timestamp"].max()}")
 
         self.val_dataloader = validation_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=num_workers, pin_memory=use_gpu)
+
+        test_source = self.pivoted.copy()
+
+        test_dataset = TimeSeriesDataSet.from_dataset(
+            self.dataset,
+            test_source,
+            min_prediction_idx=val_cutoff + 1,
+            stop_randomization=True,
+        )
+        self.test_dataloader = test_dataset.to_dataloader(train=False, batch_size=batch_size, num_workers=num_workers, pin_memory=use_gpu)
 
 
     def train(self,
@@ -150,7 +169,7 @@ class Orchestration:
         early_stop = EarlyStopping(
             monitor="val_loss",
             min_delta=0.0,
-            patience=5,
+            patience=15,
             mode="min",
         )
 
@@ -161,10 +180,6 @@ class Orchestration:
             dirpath="checkpoints",
             filename="tft-best-{epoch:02d}-{val_loss:.4f}",
         )
-
-        print("about to fetch one train batch", flush=True)
-        _ = next(iter(self.train_dataloader))
-        print("fetched one train batch", flush=True)
 
         trainer = Trainer(max_epochs=max_epochs,
                           accelerator=accelerator,
@@ -184,11 +199,11 @@ class Orchestration:
 
     def save_predictions(self, save_location: str="src/ai_stock_forecasts/orchestration/val_predictions_series_level.csv"):
         assert isinstance(self.model, TemporalFusionTransformer)
-        assert isinstance(self.val_dataloader, DataLoader)
+        assert isinstance(self.test_dataloader, DataLoader)
         assert isinstance(self.symbol_encoder, NaNLabelEncoder)
 
         predictions = self.model.predict(
-            self.val_dataloader,
+            self.test_dataloader,
             mode="quantiles",
             return_x=True,
             return_y=True,
@@ -229,6 +244,19 @@ class Orchestration:
         self.predictionsDF.to_csv(save_location, index=False)
         # print(self.predictionsDF.head())
 
+    def interpret_output(self):
+        assert isinstance(self.model, TemporalFusionTransformer)
+ 
+        raw = self.model.predict(self.test_dataloader, mode="raw", return_x=True)
+
+        interp = self.model.interpret_output(raw.output, reduction="sum")
+
+        print(interp)
+
+        fig = self.model.plot_interpretation(interp)
+        plt.show()
+
+
 
     def _get_decoder_timestamps(self, predictions) -> np.ndarray:
         assert isinstance(self.symbol_encoder, NaNLabelEncoder)
@@ -256,10 +284,14 @@ class Orchestration:
 
         return timestamps
 
-    def evaluate_validation_period_profit(self, interval_days: int=7, num_stocks_purchased: int=10):
+    def evaluate_validation_period_profit(self, interval_days: int=7, num_stocks_purchased: int=10, capital_gains_tax: float=0.0, compound_money:bool=True, dont_buy_negative_stocks:bool=False):
         assert isinstance(self.predictionsDF, pd.DataFrame)
 
-        money = 25000
+
+        period_returns = []
+        total_money = []
+        starting_money = 25000
+        money = starting_money
         timestamps = (
             self.predictionsDF["timestamp"]
             .drop_duplicates()
@@ -269,7 +301,8 @@ class Orchestration:
         # print(f"the length of timestamps: {len(timestamps)}")
         current_ts = timestamps.min()
         while True:
-            filtered = self.predictionsDF[self.predictionsDF["timestamp"] == current_ts]
+            mask = self.predictionsDF["timestamp"] == current_ts
+            filtered = self.predictionsDF.loc[mask].copy()
 
             # determine what stocks to buy
             p30 = np.stack(filtered["y_pred_p30"].to_numpy())
@@ -283,16 +316,27 @@ class Orchestration:
             x = (end - start) / (start + eps) * 100.0
             band_width_pct = (p70 - p30) / (p30 + eps) * 100.0
             y = band_width_pct.mean(axis=1)
-            score = x - y * 0.01
+            score = x #- (y * 0.1)
             # score = x
-            filtered["x"] = x
-            filtered["z"] = y
-            filtered["score"] = score
+            filtered.loc[:, "x"] = x
+            filtered.loc[:, "z"] = y
+            filtered.loc[:, "score"] = score
 
+            # dont_buy_negative_stocks
             top_x = filtered.sort_values("score", ascending=False).head(num_stocks_purchased)
-            # print(top_x['symbol'])
+            if (dont_buy_negative_stocks):
+                top_x = top_x[top_x["score"] > 0.0]
+            if len(top_x) < num_stocks_purchased:
+                print(current_ts)
+                print("KILGOMIC HERE")
+                print(top_x['score'])
 
-            total_profit = sum(((row[interval_days] - row[0]) / row[0]) * (25000 / num_stocks_purchased) for row in top_x["y"])
+            total_profit = 0
+            if len(top_x) > 0:
+                total_profit = sum(((row[interval_days] - row[0]) / row[0]) * (money / len(top_x)) for row in top_x["y"])
+
+            period_returns.append(total_profit / money)
+            total_money.append(money)
             # print(f"Total Profit (investing $500 per stock): {total_profit}")
             money += total_profit
 
@@ -303,11 +347,12 @@ class Orchestration:
             current_ts = timestamps[i + interval_days]
 
         # print(f"Total money made over 2024: {money - 25000}")
-        absolute_difference = abs(money - 25000)
-        average = (money + 25000) / 2
-        difference = (absolute_difference / average) * 100
+        absolute_difference = money - starting_money
+        money_left_post_tax = money - (absolute_difference*capital_gains_tax)
+        difference = ((money_left_post_tax - starting_money) / starting_money) * 100
+        print(f"money left post tax: {money_left_post_tax}")
         # print(f"Percentage gained: {difference}")
-        return difference
+        return difference, period_returns, total_money
 
     def quick_set_predictions_df(self, pred_file: str="src/ai_stock_forecasts/orchestration/val_predictions_series_level.csv"):
         pd.set_option('display.max_columns', None)
@@ -331,6 +376,23 @@ class Orchestration:
             if col in self.predictionsDF.columns and self.predictionsDF[col].dtype == "object":
                 self.predictionsDF[col] = self.predictionsDF[col].apply(parse_series_string)
 
+    """ assumes we can generate 5% returns annually risk free.
+        sharpe_annual > 1 is considered good, but greater than 2 or even 3 is ideal.
+        p_two_sided of 0.11 for example means there is an 11% chance that these results could've been generated at random.
+    """
+    def calculate_sharpe_ratio_and_p_value(self, period_returns):
+        rf_period = (1 + 0.05) ** (1 / len(period_returns)) - 1
+        r = np.array(period_returns)
+        excess = r - rf_period
+
+        sharpe_daily = excess.mean() / excess.std(ddof=1)
+        sharpe_annual = sharpe_daily * np.sqrt(len(period_returns))
+
+        z = sharpe_daily * np.sqrt(len(period_returns))
+        # p_one_sided = norm.sf(z)
+        p_two_sided = 2 * norm.sf(abs(z))
+
+        return sharpe_annual, p_two_sided
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -348,8 +410,9 @@ def parse_args():
     parser.add_argument("--val_start", type=str, default="2024-01-02")
     parser.add_argument("--val_end", type=str, default="2025-01-01")
 
-    parser.add_argument("--max_lookback_period", type=int, default=1000)
-    parser.add_argument("--max_prediction_length", type=int, default=14)
+    # these two fields are the only two that need to be set appropriately based on the model being loaded in.
+    parser.add_argument("--max_lookback_period", type=int, default=60)
+    parser.add_argument("--max_prediction_length", type=int, default=2)
 
     parser.add_argument("--symbols_path", type=str, default="src/ai_stock_forecasts/constants/symbols.txt")
 
@@ -361,6 +424,25 @@ def parse_args():
 
     return parser.parse_args()
 
+def prep_datasets(orchestration: Orchestration):
+    args = parse_args()
+
+    with open(args.symbols_path, "r") as f:
+        symbols = [line.strip() for line in f]
+
+    features = ['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap']
+
+    train_start = datetime.fromisoformat(args.train_start).replace(tzinfo=timezone.utc)
+    train_end = datetime.fromisoformat(args.train_end).replace(tzinfo=timezone.utc)
+    val_start = datetime.fromisoformat(args.val_start).replace(tzinfo=timezone.utc)
+    val_end = datetime.fromisoformat(args.val_end).replace(tzinfo=timezone.utc)
+
+    orchestration.load_dataset(symbols, features,
+                                train_start, train_end,
+                                val_start, val_end,
+                                args.max_lookback_period, args.max_prediction_length,
+                                TimeFrame(1, TimeFrameUnit.Day), args.accelerator, args.num_workers, args.batch_size)
+
 if __name__ == "__main__":
     args = parse_args()
 
@@ -368,7 +450,7 @@ if __name__ == "__main__":
         symbols = [line.strip() for line in f]
 
     orchestration = Orchestration()
-    features = ['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap']
+    features = ['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap', 'day_of_week', 'day_of_month', 'month', 'year']
     # features = ['open']
 
     train_start = datetime.fromisoformat(args.train_start).replace(tzinfo=timezone.utc)
@@ -376,27 +458,63 @@ if __name__ == "__main__":
     val_start = datetime.fromisoformat(args.val_start).replace(tzinfo=timezone.utc)
     val_end = datetime.fromisoformat(args.val_end).replace(tzinfo=timezone.utc)
 
-    # orchestration.load_dataset(symbols, features,
-    #                            train_start, train_end,
-    #                            val_start, val_end,
-    #                            args.max_lookback_period, args.max_prediction_length,
-    #                            TimeFrame.Day, args.accelerator, args.num_workers, args.batch_size)
-    #orchestration.train(args.learning_rate, args.hidden_size, args.attention_head_size, args.dropout, args.hidden_continuous_size,
-    #                   args.lstm_layers, 3, args.max_epochs, args.accelerator, args.devices)
+    orchestration.load_dataset(symbols, features,
+                                 train_start, train_end,
+                                 val_start, val_end,
+                                 args.max_lookback_period, args.max_prediction_length,
+                                 TimeFrame(1, TimeFrameUnit.Day), args.accelerator, args.num_workers, args.batch_size)
+    orchestration.train(args.learning_rate, args.hidden_size, args.attention_head_size, args.dropout, args.hidden_continuous_size,
+                        args.lstm_layers, 3, args.max_epochs, args.accelerator, args.devices)
 
-    #orchestration.load_trained_model("src/ai_stock_forecasts/orchestration/tft_model_expensive.ckpt")
-    # result = orchestration.evaluate_validation_period_profit(7, 50)
-    # print(f"result pre-expensive training: {result}")
+    # tft_model_60_day_lookback
+    # orchestration.load_trained_model("src/ai_stock_forecasts/orchestration/tft_model_60_day_lookback.ckpt")
+    #orchestration.load_trained_model("src/ai_stock_forecasts/orchestration/tft_model_60_day_lookback_with_timestamp_features.ckpt")
+    #orchestration.save_predictions("src/ai_stock_forecasts/orchestration/val_predictions_60_day_lookback_series_level_2025_with_timestamp_features.csv")
+    #orchestration.interpret_output()
 
-    orchestration.quick_set_predictions_df("src/ai_stock_forecasts/orchestration/val_predictions_series_level_expensive.csv")
+    #orchestration.quick_set_predictions_df("src/ai_stock_forecasts/orchestration/val_predictions_60_day_lookback_series_level_2025_with_timestamp_features.csv")
 
-    results = {}
-    for interval in range(1,14):
-        for num_stocks in range(1, 51):
-            results[(interval, num_stocks)] = orchestration.evaluate_validation_period_profit(interval, num_stocks)
+    result, period_returns, total_money = orchestration.evaluate_validation_period_profit(1, 10, 0.35, dont_buy_negative_stocks=True)
 
-    print(results)
+    # print(f"60 day lookback returns: {len(period_returns)}")
+    # print(total_money)
+    # print(f"60 day lookback result: {result}")
 
-    plot_different_forecast_strategies_profits(results)
+    # rf_period = (1 + 0.05) ** (1 / len(period_returns)) - 1
 
+    # r = np.array(period_returns)
+    # excess = r - rf_period
+
+    # sharpe_daily = excess.mean() / excess.std(ddof=1)
+    # sharpe_annual = sharpe_daily * np.sqrt(len(period_returns))
+
+    # z = sharpe_daily * np.sqrt(len(period_returns))
+    # p_one_sided = norm.sf(z)
+    # p_two_sided = 2 * norm.sf(abs(z))
+
+    # print("sharpe_daily:", sharpe_daily)
+    # print("sharpe_annual:", sharpe_annual)
+    # print("p_one_sided:", p_one_sided)
+    # print("p_two_sided:", p_two_sided)
+
+    # print(period_returns)
+    # plot_arr(total_money)
+
+
+    # results = {}
+    # for interval in range(1,2):
+    #     for num_stocks in range(1, 51):
+    #         result, period_returns = orchestration.evaluate_validation_period_profit(interval, num_stocks)
+
+    #         rf_period = (1 + 0.05) ** (1 / len(period_returns)) - 1
+    #         r = np.array(period_returns)
+    #         excess = r - rf_period
+
+    #         sharpe = (excess.mean() / excess.std(ddof=1)) * np.sqrt(len(period_returns))
+
+    #         results[(interval, num_stocks)] = result
+
+    # print(results)
+
+    # plot_different_forecast_strategies_profits(results)
 

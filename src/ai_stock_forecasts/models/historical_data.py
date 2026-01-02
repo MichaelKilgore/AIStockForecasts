@@ -18,5 +18,29 @@ class HistoricalData:
         self.date = date
 
     def __str__(self):
-        return f"symbol: {self.symbol}, timestamp: {self.timestamp}, price: {self.price}"
+        return f"symbol: {self.symbol}, timestamp: {self.timestamp}, type: {self.type}, value: {self.value}"
+
+    def __eq__(self, other):
+        if not isinstance(other, type(self)):
+            return NotImplemented
+
+        return ( self.symbol == other.symbol and
+                 self.timestamp == other.timestamp and
+                 self.feature == other.feature and
+                 self.value == other.value and
+                 self.type == other.type and
+                 self.time_frame == other.time_frame and
+                 self.date == other.date )
+
+    def __hash__(self):
+        return hash((
+            self.symbol,
+            self.timestamp,
+            self.feature,
+            self.value,
+            self.type,
+            self.time_frame,
+            self.date,
+        ))
+
 

@@ -10,6 +10,18 @@ def plot_different_forecast_strategies_profits(vals):
 
     plt.show()
 
+def plot_arr(arr):
+    _, ax = plt.subplots()
+    for i, val in enumerate(arr):
+        ax.scatter(i, val, alpha=0.3, edgecolors='none')
+
+    ax.legend()
+    ax.grid(True)
+
+    plt.show()
+
+
+
 
 if __name__ == "__main__":
     x = {}

@@ -2,7 +2,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 import os
-from alpaca.data import StockHistoricalDataClient, TimeFrame
+from alpaca.data import StockHistoricalDataClient, TimeFrame, TimeFrameUnit
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
 
 from ai_stock_forecasts.models.stock import Stock
@@ -32,7 +32,7 @@ class GetHistoricalDataUtil:
 
         return res
 
-    def get_historical_stock_prices(self, stocks: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame.Day) -> list[StockBar]:
+    def get_historical_stock_prices(self, stocks: list[str], start: datetime, end: datetime, time_frame: TimeFrame = TimeFrame(amount=1, unit=TimeFrameUnit.Day)) -> list[StockBar]:
         multisymbol_request_params = StockBarsRequest(symbol_or_symbols=stocks,
                                                       timeframe=time_frame,
                                                       start=start,

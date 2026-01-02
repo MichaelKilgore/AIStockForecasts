@@ -1,4 +1,4 @@
-from alpaca.data import TimeFrame
+from alpaca.data import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 import os
 import boto3
@@ -27,10 +27,10 @@ class S3ParquetUtil:
             aws_secret_access_key=secret_access_key,
         )
 
-    def get_features_data(self, symbols: list[str], features: list[str], time_frame: TimeFrame=TimeFrame.Day) -> list[HistoricalData]:
+    def get_features_data(self, symbols: list[str], features: list[str], time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)) -> list[HistoricalData]:
         res = []
         for feature in features:
-            print(f"pulling feature data for feature: {feature}, time_frame: {time_frame.unit_value.value}")
+            print(f"pulling feature data for feature: {feature}, time_frame: {time_frame.unit_value.value}, prefix: {self.prefix}")
             prefix = f"{self.prefix}/feature={feature}/time_frame={time_frame.unit_value.value}/"
 
             continuation_token = None
@@ -84,22 +84,26 @@ class S3ParquetUtil:
         return filtered_res
 
 
-    def upload_features_data(self, records: list[HistoricalData], time_frame: TimeFrame=TimeFrame.Day):
+    def upload_features_data(self, records: list[HistoricalData], time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
         records_by_partitions: dict[str, list[HistoricalData]] = defaultdict(list)
         for r in records:
             partitions = r.feature + r.time_frame.unit_value.value
             records_by_partitions[partitions].append(r)
 
         for key, recs in records_by_partitions.items():
-            rows = [self._to_row(r) for r in recs]
-            df = pd.DataFrame(rows)
+            rows = (self._to_row(r) for r in recs)
+            df = pd.DataFrame.from_records(rows)
 
             buffer = io.BytesIO()
             df.to_parquet(buffer, index=False)
             buffer.seek(0)
 
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-            key = f"{self.prefix}/feature={recs[0].feature}/time_frame={time_frame.unit_value.value}/historical_data_{ts}.parquet"
+            key = None
+            if time_frame.amount_value == 1:
+                key = f"{self.prefix}/feature={recs[0].feature}/time_frame={time_frame.unit_value.value}/historical_data_{ts}.parquet"
+            else:
+                key = f"{self.prefix}/feature={recs[0].feature}/time_frame={time_frame.amount_value}-{time_frame.unit_value.value}/historical_data_{ts}.parquet"
 
             self.s3.put_object(
                 Bucket=self.bucket,

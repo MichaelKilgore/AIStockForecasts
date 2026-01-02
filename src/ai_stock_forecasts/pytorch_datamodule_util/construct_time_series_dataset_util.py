@@ -1,21 +1,24 @@
 from datetime import datetime
 
 import pandas as pd
-from alpaca.data import TimeFrame
 from pandas import DataFrame
+from alpaca.data import TimeFrame
+from pytorch_forecasting import NaNLabelEncoder
 from pytorch_forecasting.data.timeseries._timeseries import TimeSeriesDataSet
 
 from ai_stock_forecasts.models.historical_data import HistoricalData
 
+"""
+    This class is used to take lists of HistoricalData objects and convert that data
+    into training / inference TimeSeriesDataSets
+"""
 class ConstructTimeSeriesDatasetUtil:
     def __init__(self):
-       self.known_features = ["timestamp"]
+       self.known_features = ["timestamp", "year", "month", "day_of_month", "day_of_week", "hour_of_day", "minute_of_day"]
 
     def build_pivoted_with_time_idx(self, data: list[HistoricalData]):
         df = pd.DataFrame([vars(r) for r in data])
         pivoted = self._pivot_features(df)
-        #pivoted = pivoted.sort_values(["symbol", "timestamp"])
-        #pivoted["time_idx"] = pivoted.groupby("symbol").cumcount().astype("int64")
         pivoted = pivoted.sort_values(["timestamp", "symbol"])
         pivoted["time_idx"] = pd.factorize(pivoted["timestamp"])[0].astype("int64")
         return pivoted
@@ -91,7 +94,6 @@ class ConstructTimeSeriesDatasetUtil:
         return pivoted
 
     def _cast_value(self, value, type_str):
-        """Convert string to the right Python type."""
         if type_str == "float":
             return float(value)
         elif type_str == "int":
@@ -113,6 +115,6 @@ if __name__ == "__main__":
 
     construct_timeseries_dataset_util = ConstructTimeSeriesDatasetUtil()
 
-    res = construct_timeseries_dataset_util.get_time_series_dataset(records, datetime(2024, 1, 1), datetime(2026, 1, 3), 1, 1)
+    res = construct_timeseries_dataset_util.get_time_series_dataset(records, datetime(2024, 1, 1), datetime(2026, 1, 3), 1, 1, NaNLabelEncoder())
 
     print(res)
