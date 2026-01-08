@@ -6,6 +6,8 @@ from alpaca.data import TimeFrame
 # This is the structure for records in our athena table: historical_data
 # This table store historical stock feature data.
 class HistoricalData:
+    __slots__ = ("symbol","timestamp","feature","value","type","updated_timestamp","time_frame","date")
+
     def __init__(self, symbol: str, timestamp: datetime, feature: str, value: str,
                  type: str, updated_timestamp: datetime, time_frame: TimeFrame, date: datetime):
         self.symbol = symbol

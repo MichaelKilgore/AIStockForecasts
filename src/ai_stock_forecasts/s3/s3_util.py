@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from pathlib import Path
+import pickle
 from alpaca.data import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 import os
@@ -6,6 +9,11 @@ import io
 import pandas as pd
 from datetime import datetime, timezone
 from collections import defaultdict
+import tarfile
+import tempfile
+
+from pytorch_forecasting.models.base import Prediction
+import cloudpickle
 
 from ai_stock_forecasts.models.historical_data import HistoricalData
 
@@ -15,6 +23,7 @@ class S3ParquetUtil:
 
         self.region = os.getenv("REGION_NAME")
         self.bucket = os.getenv("S3_BUCKET_NAME")
+        self.model_output_bucket = os.getenv("S3_MODEL_OUTPUT_BUCKET_NAME")
         self.prefix = os.getenv("ATHENA_TABLE_S3_PREFIX")
 
         access_key = os.getenv("ACCESS_KEY")
@@ -27,11 +36,24 @@ class S3ParquetUtil:
             aws_secret_access_key=secret_access_key,
         )
 
-    def get_features_data(self, symbols: list[str], features: list[str], time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)) -> list[HistoricalData]:
-        res = []
+    """ returns a dataframe with the following columns always:
+            timestamp: timestamp
+            value: string
+            type: string
+            updated_timestamp: timestamp
+            date: date
+            symbol: string
+            feature: string
+            time_frame: string
+    """
+    def get_features_data(self, symbols: list[str], features: list[str], time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)) -> pd.DataFrame:
+        dfs = []
         for feature in features:
             print(f"pulling feature data for feature: {feature}, time_frame: {time_frame.unit_value.value}, prefix: {self.prefix}")
-            prefix = f"{self.prefix}/feature={feature}/time_frame={time_frame.unit_value.value}/"
+            if time_frame.amount_value == 1:
+                prefix = f"{self.prefix}/feature={feature}/time_frame={time_frame.unit_value.value}/"
+            else:
+                prefix = f"{self.prefix}/feature={feature}/time_frame={time_frame.amount_value}-{time_frame.unit_value.value}/"
 
             continuation_token = None
             while True:
@@ -59,29 +81,22 @@ class S3ParquetUtil:
 
                     df = pd.read_parquet(io.BytesIO(data))
 
-                    print(f"appending results to final res for s3 key: {key}")
-                    for row in df.itertuples(index=False):
-                        res.append(
-                            HistoricalData(
-                                symbol=row.symbol,
-                                timestamp=row.timestamp,
-                                feature=row.feature,
-                                value=row.value,
-                                type=row.type,
-                                updated_timestamp=row.updated_timestamp,
-                                time_frame=time_frame,
-                                date=row.date,
-                            )
-                        )
+                    df = df[df["symbol"].isin(symbols)]
+                    if time_frame.unit in (TimeFrameUnit.Minute, TimeFrameUnit.Hour):
+                        h = df["timestamp"].dt.hour
+                        df = df[(h > 9) & (h < 16)]
+
+                    dfs.append(df)
+
 
                 if response.get("IsTruncated"):
                     continuation_token = response.get("NextContinuationToken")
                 else:
                     break
 
-        filtered_res = [r for r in res if r.symbol in symbols]
+        final_df = pd.concat(dfs, ignore_index=True)
 
-        return filtered_res
+        return final_df
 
 
     def upload_features_data(self, records: list[HistoricalData], time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
@@ -125,6 +140,83 @@ class S3ParquetUtil:
             "date": rec.date.date(),
         }
 
+    def save_raw_predictions(self, model_id: str, predictions: Prediction):
+        key = 'model_predictions/'+model_id+'.pkl'
+        print(f'saving raw predictions for model_id: {model_id} to {key}')
+        buf = io.BytesIO()
+        cloudpickle.dump(predictions, buf, protocol=pickle.HIGHEST_PROTOCOL)
+        buf.seek(0)
+
+        self.s3.put_object(Bucket=self.bucket, Key=key, Body=buf.getvalue())
+
+    def save_human_readable_predictions(self, model_id: str, predictions: pd.DataFrame):
+        key = 'model_predictions_readable/'+model_id+'.pkl'
+        print(f'saving human readable predictions for model_id: {model_id} to {key}')
+ 
+        buf = io.BytesIO()
+        pickle.dump(predictions, buf, protocol=pickle.HIGHEST_PROTOCOL)
+        buf.seek(0)
+
+        self.s3.put_object(Bucket=self.bucket, Key=key, Body=buf.getvalue())
+
+    def load_raw_predictions(self, model_id: str) -> pd.DataFrame:
+        key = 'model_predictions/'+model_id+'.pkl'
+        print(f'loading raw predictions for model_id: {model_id} from {key}')
+
+        obj = self.s3.get_object(Bucket=self.bucket, Key=key)
+        data = obj['Body'].read()
+        return cloudpickle.loads(data)
+
+    def load_human_readable_predictions(self, model_id: str):
+        key = 'model_predictions_readable/'+model_id+'.pkl'
+        print(f'loading human readable predictions for model_id: {model_id} from {key}')
+
+        obj = self.s3.get_object(Bucket=self.bucket, Key=key)
+        data = obj["Body"].read()
+        return pickle.loads(data)
+
+    @contextmanager
+    def load_best_model_checkpoint(self, model_id: str):
+        key = model_id + '/output/model.tar.gz'
+        print(f'loading model ckpt for model_id: {model_id} from {key}')
+
+        obj = self.s3.get_object(Bucket=self.model_output_bucket, Key=key)
+        buf = io.BytesIO(obj["Body"].read())
+        buf.seek(0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+                """ On macOS, when files get copied/archived in certain ways, 
+                    it can create companion files that start with ._ which contain 
+                    Finder/resource-fork metadata. Those files can end up inside your 
+                    tarball alongside the real files so we have to exlude files that start with '._'
+                """
+                ckpts = [
+                    m for m in tf.getmembers()
+                    if m.isfile() and m.name.endswith(".ckpt") and m.size and m.size > 0 and not Path(m.name).name.startswith("._")
+                ]
+                if not ckpts:
+                    raise FileNotFoundError("No non-empty .ckpt files found in model.tar.gz")
+
+                # Prefer ones whose *filename* contains 'best'
+                def score(m):
+                    name = Path(m.name).name.lower()
+                    if "best" in name:
+                        return 0
+                    if "last" in name:
+                        return 1
+                    return 2
+
+                ckpts.sort(key=score)
+                member = ckpts[0]
+                print(f'pulling this ckpt: {member.name}')
+
+                tf.extract(member, path=tmp)
+                ckpt_path = os.path.join(tmp, member.name)
+
+                yield ckpt_path
+
+
 if __name__ == "__main__":
     """test_record = HistoricalData(
         "TEST",
@@ -141,6 +233,6 @@ if __name__ == "__main__":
     uploader.upload_records([test_record])"""
 
     s3_util = S3ParquetUtil()
-    res = s3_util.get_features_data(["GOOGL"], ["open"], TimeFrame.Day)
+    res = s3_util.get_features_data(["GOOGL"], ["open"], TimeFrame(1, TimeFrameUnit.Day))
 
     print(res[0].value)
