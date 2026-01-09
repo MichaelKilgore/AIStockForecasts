@@ -1,5 +1,5 @@
 configs:
-  sagemaker-daily-1-with-time-features:
+  sagemaker-simple-daily-1-with-time-features:
     notes: 'todo - run in progress'
     features:
       - open
@@ -19,10 +19,11 @@ configs:
     test_end: "2026-01-01"
     max_lookback_period: 60
     max_prediction_length: 2
-    accelerator: 'mps'
+    accelerator: 'gpu'
+    local_accelerator: 'mps'
     devices: 1
     num_workers: 4
-    batch_size: 2048
+    batch_size: 16384
     hidden_size: 8
     attention_head_size: 1
     dropout: 0.1
@@ -36,8 +37,29 @@ configs:
     _instance_type: 'ml.g4dn.xlarge'
     _instance_count: 1
     _run_time: '2 hours 54 minutes'
+    _loss: 'QuantileLoss(0.3, 0.5, 0.7)'
+    _performance_test_1:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 25
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 26387.189453125
+      _annual_sharpe: 0.29505146797601095
+    _performance_test_2:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 10
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 26467.83984375
+      _annual_sharpe: 0.3002042425629233
   m1-simple-daily-1-with-time-features:
-    notes: 'same config as sagemaker-daily-1-with-time-features'
+    notes: 'same config as sagemaker-daily-1-with-time-features but different batch_size and num_workers'
     features:
       - open
       - close
@@ -70,6 +92,8 @@ configs:
     time_frame_unit: 'Day'
     time_frame_amount: 1
     reduce_on_plateau_patience: 5
+    _best_val_loss: 3.3939
+    _loss: 'QuantileLoss(0.3, 0.5, 0.7)'
     _performance_test_1:
       _test_strategy: SimpleXDaysAheadBuying
       _test_range: '2025-01-01 - 2026-01-01'
@@ -94,10 +118,60 @@ configs:
       _test_strategy: SimpleXDaysAheadBuying
       _test_range: '2025-01-01 - 2026-01-01'
       _interval_days: 1
-      _num_stocks_purchased: 50
+      _num_stocks_purchased: 25
       _capital_gains_tax: 0.35
       _compound_money: True
       _dont_buy_negative_stocks: True
       _money_made: 29698.55089229681
       _annual_sharpe: 1.00150936976123
+  m1-simple-daily-1-with-time-features-fine-tuned:
+    notes: 'finetuning results of m1-simple-daily-1-with-time-features. Only ran for 18 epochs. It did not improve val loss at all. Model performance on test dataset also degraded slightly most likely because of the val loss'
+    fine_tuning_model_id: 'm1-simple-daily-1-with-time-features'
+    features:
+      - open
+      - close
+      - high
+      - low
+      - trade_count
+      - volume
+      - vwap
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 60
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 8
+    attention_head_size: 1
+    dropout: 0.1
+    hidden_continuous_size: 4
+    lstm_layers: 1
+    learning_rate: 0.0001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 5
+    _loss: 'QuantileLoss(0.3, 0.5, 0.7)'
+    _best_val_loss: 3.537207
+    _best_train_loss: 2.646061
+    _performance_test_1:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 10
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 30810.091796875
+      _annual_sharpe: 1.0870619603961278
+
+
 

@@ -8,6 +8,7 @@ import yaml
 import os
 from ai_stock_forecasts.model.model.model_module import ModelModule
 from ai_stock_forecasts.model.trading_algorithms.simple_x_days_ahead_buying import SimpleXDaysAheadBuying
+import sys
 
 from ai_stock_forecasts.model.data.training_data_module import TrainingDataModule
 
@@ -22,7 +23,7 @@ def global_rank() -> int:
 
 
 class Orchestration:
-    def __init__(self, symbols: list[str], model_id: str, config_path: str, model_ckpt_path: str=''):
+    def __init__(self, symbols: list[str], model_id: str, config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
             full_config = yaml.safe_load(f) or {}
 
@@ -46,7 +47,12 @@ class Orchestration:
 
         self.batch_size: int = self.config['batch_size']
         self.num_workers: int = self.config['num_workers']
-        self.accelerator: str = self.config['accelerator']
+
+        if sys.platform == 'darwin':
+            self.accelerator: str = 'mps'
+        else:
+            self.accelerator: str = self.config['accelerator']
+
         self.devices: int = self.config['devices']
 
         time_frame_amount: int = self.config['time_frame_amount']
@@ -69,8 +75,10 @@ class Orchestration:
         self.reduce_on_plateau_patience = self.config['reduce_on_plateau_patience']
         self.max_epochs: int = self.config['max_epochs']
 
-        if model_ckpt_path != '':
-            self.ckpt = model_ckpt_path
+        if 'fine_tuning_model_id' in self.config:
+            self.fine_tuning_model_id = self.config['fine_tuning_model_id']
+        else:
+            self.fine_tuning_model_id = None
 
 
     def run_training(self):
@@ -85,6 +93,9 @@ class Orchestration:
             self.training_data_module.cache_df()
 
         self.model_module = ModelModule()
+
+        if self.fine_tuning_model_id:
+            self._load_model(self.fine_tuning_model_id)
 
         if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet) or
            not isinstance(self.training_data_module.train_dataloader, DataLoader) or
@@ -124,19 +135,20 @@ class Orchestration:
         except:
             raise Exception('You must run batch inference before attempting to run evaluation')
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(num_stocks_purchased=25, capital_gains_tax=0.35)
+        self.trading_algorithm = SimpleXDaysAheadBuying(num_stocks_purchased=10, capital_gains_tax=0.35)
 
         self.trading_algorithm.simulate(self.model_module.predictionsDF)
 
 
-    def _load_model(self):
+    def _load_model(self, model_id=''):
+        model_id = model_id if model_id != '' else self.model_id
         try:
-            self.model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
+            self.model_module.load_model_from_checkpoint(model_id, self.accelerator)
         except:
             if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet)):
                 raise Exception('something went wrong...')
             else:
-                self.model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator, 
+                self.model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
                                                                       self.training_data_module.training_dataset,
                                                                       self.learning_rate, self.hidden_size, 
                                                                       self.attention_head_size, self.dropout,
@@ -149,8 +161,7 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='m1-simple-daily-1-with-time-features')
-    parser.add_argument('--ckpt', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/tft_model.ckpt')
+    parser.add_argument('--model_id', type=str, default='m1-simple-daily-1-with-time-features-fine-tuned')
 
     return parser.parse_args()
 
@@ -167,11 +178,11 @@ if __name__ == '__main__':
         os.environ['LOCAL_RANK'] = '0'
         os.environ['RANK'] = '0'
 
-    orc = Orchestration(symbols, args.model_id, args.config_path, args.ckpt)
+    orc = Orchestration(symbols, args.model_id, args.config_path)
 
     #orc.run_training()
     orc.run_batch_inference()
-    #orc.run_evaluation()
+    orc.run_evaluation()
 
 
 

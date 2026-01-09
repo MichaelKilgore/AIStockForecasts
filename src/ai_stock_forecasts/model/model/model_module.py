@@ -95,20 +95,24 @@ class ModelModule:
                      accelerator: str, devices: int,
                      train_dataloader: DataLoader, val_dataloader: DataLoader):
 
-        self.model = TemporalFusionTransformer.from_dataset(
-            training_dataset,
-            learning_rate=learning_rate,
-            hidden_size=hidden_size,
-            attention_head_size=attention_head_size,
-            dropout=dropout,
-            loss=self.loss,
-            output_size=self.output_size,
-            hidden_continuous_size=hidden_continuous_size,
-            lstm_layers=lstm_layers,
-            log_interval=10,
-            log_val_interval=1,
-            reduce_on_plateau_patience=reduce_on_plateau_patience,
-        )
+
+        if (not isinstance(self.model, TemporalFusionTransformer)):
+            self.model = TemporalFusionTransformer.from_dataset(
+                training_dataset,
+                learning_rate=learning_rate,
+                hidden_size=hidden_size,
+                attention_head_size=attention_head_size,
+                dropout=dropout,
+                loss=self.loss,
+                output_size=self.output_size,
+                hidden_continuous_size=hidden_continuous_size,
+                lstm_layers=lstm_layers,
+                log_interval=10,
+                log_val_interval=1,
+                reduce_on_plateau_patience=reduce_on_plateau_patience,
+            )
+        else:
+            print('model is already loaded in, running fine tuning')
 
         self.trainer = Trainer(
             max_epochs=max_epochs,
