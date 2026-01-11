@@ -10,7 +10,8 @@ Simulates purchasing x stocks every y days over the entire predictions df passed
 """
 class SimpleXDaysAheadBuying(BaseTradingModule): 
     def __init__(self, interval_days: int=1, num_stocks_purchased: int=10,
-                 capital_gains_tax: float=0.35, compound_money:bool=True, dont_buy_negative_stocks:bool=True):
+                 capital_gains_tax: float=0.35, compound_money:bool=True,
+                 dont_buy_negative_stocks:bool=True, uncertainty_multiplier:float=0.4):
         super().__init__()
         
         self.interval_days: int = interval_days
@@ -18,6 +19,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         self.capital_gains_tax: float = capital_gains_tax
         self.compound_money: bool = compound_money
         self.dont_buy_negative_stocks: bool = dont_buy_negative_stocks
+        self.uncertainty_multiplier: float = uncertainty_multiplier
 
 
     """
@@ -63,7 +65,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
                we factor in a combination of which stocks are predicted
                to rise the most, but also factor in uncertainty, greater
                distances between p30 and p70 suggest the stock is volatile."""
-            score = x - (y * 0.4)
+            score = x - (y * self.uncertainty_multiplier)
 
             filtered.loc[:, "x"] = x
             filtered.loc[:, "z"] = y

@@ -212,6 +212,9 @@ class ModelModule:
             "y_pred_p70": list(p70),
         })
 
+    def upload_checkpoints_to_s3(self, model_id: str):
+        self.s3_util.upload_checkpoints(self.ckpt_dir, self.model_dir, model_id)
+
     def quick_set_predictions_df(self, pred_file: str="src/ai_stock_forecasts/orchestration/val_predictions_series_level.csv"):
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', 2000)

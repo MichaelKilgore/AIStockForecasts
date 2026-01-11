@@ -95,7 +95,7 @@ class Orchestration:
         self.model_module = ModelModule()
 
         if self.fine_tuning_model_id:
-            self._load_model(self.fine_tuning_model_id)
+            self._load_model(self.fine_tuning_model_id, modify_dropout=True)
 
         if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet) or
            not isinstance(self.training_data_module.train_dataloader, DataLoader) or
@@ -107,6 +107,9 @@ class Orchestration:
                                            self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
                                            self.accelerator, self.devices, self.training_data_module.train_dataloader,
                                            self.training_data_module.validation_dataloader)
+
+        if sys.platform == 'darwin':
+            self.model_module.upload_checkpoints_to_s3(self.model_id)
 
     def run_batch_inference(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
@@ -135,16 +138,44 @@ class Orchestration:
         except:
             raise Exception('You must run batch inference before attempting to run evaluation')
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(num_stocks_purchased=10, capital_gains_tax=0.35)
+        self.trading_algorithm = SimpleXDaysAheadBuying(num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.0, dont_buy_negative_stocks=False)
 
         self.trading_algorithm.simulate(self.model_module.predictionsDF)
 
+    def explain_model(self):
+        self.training_data_module = TrainingDataModule(self.symbols, self.features,
+                                                       self.time_frame,
+                                                       self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
 
-    def _load_model(self, model_id=''):
+        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
+        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
+
+        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
+        self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+
+        self.model_module = ModelModule()
+
+        self._load_model()
+
+        self.model_module.interpret_predictions(self.training_data_module.train_dataloader)
+
+
+    def _load_model(self, model_id='', modify_dropout=False):
         model_id = model_id if model_id != '' else self.model_id
-        try:
-            self.model_module.load_model_from_checkpoint(model_id, self.accelerator)
-        except:
+        if not modify_dropout:
+            try:
+                self.model_module.load_model_from_checkpoint(model_id, self.accelerator)
+            except:
+                if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet)):
+                    raise Exception('something went wrong...')
+                else:
+                    self.model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
+                                                                          self.training_data_module.training_dataset,
+                                                                          self.learning_rate, self.hidden_size, 
+                                                                          self.attention_head_size, self.dropout,
+                                                                          self.hidden_continuous_size, self.lstm_layers, 
+                                                                          self.reduce_on_plateau_patience)
+        else:
             if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet)):
                 raise Exception('something went wrong...')
             else:
@@ -161,7 +192,7 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='m1-simple-daily-1-with-time-features-fine-tuned')
+    parser.add_argument('--model_id', type=str, default='m1-medium-with-less-features-and-longer-lookback')
 
     return parser.parse_args()
 
@@ -180,9 +211,10 @@ if __name__ == '__main__':
 
     orc = Orchestration(symbols, args.model_id, args.config_path)
 
-    #orc.run_training()
-    orc.run_batch_inference()
-    orc.run_evaluation()
+    orc.run_training()
+    #orc.run_batch_inference()
+    #orc.run_evaluation()
+    #orc.explain_model()
 
 
 

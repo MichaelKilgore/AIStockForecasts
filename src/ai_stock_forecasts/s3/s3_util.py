@@ -216,6 +216,20 @@ class S3ParquetUtil:
 
                 yield ckpt_path
 
+    def upload_checkpoints(self, checkpoints_path: str, out_path: str, model_id: str):
+        checkpoints = Path(checkpoints_path)
+        key = f'{model_id}/output/model.tar.gz'
+
+        print(f'uploading checkpoints path {checkpoints} to {key}')
+
+        with tarfile.open(f'{out_path}/model.tar.gz', mode="w:gz") as tf:
+            tf.add(checkpoints, arcname=checkpoints.name)
+
+        out_dir = Path(out_path)
+        tar_path = out_dir / 'model.tar.gz'
+        with tar_path.open("rb") as f:
+            self.s3.put_object(Bucket=self.model_output_bucket, Key=key, Body=f)
+
 
 if __name__ == "__main__":
     """test_record = HistoricalData(

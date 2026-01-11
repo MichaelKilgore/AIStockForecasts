@@ -172,6 +172,287 @@ configs:
       _dont_buy_negative_stocks: True
       _money_made: 30810.091796875
       _annual_sharpe: 1.0870619603961278
-
+  m1-medium-daily-1-with-time-features-and-faster-learning-rate:
+    notes: 'upgrading the hidden_size, attention_head_size, hidden_continuous_size, and learning rate'
+    features:
+      - open
+      - close
+      - high
+      - low
+      - trade_count
+      - volume
+      - vwap
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 60
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 16
+    attention_head_size: 2
+    dropout: 0.1
+    hidden_continuous_size: 8
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    best_val_loss: 2.8900
+    train_loss: 2.580746
+    reduce_on_plateau_patience: 5
+    feature_importance_notes: 'encoder variable importance labels open as 87% importance, every other feature is less than 3%. decoder variable importance gave day_of_week 80%'
+    _performance_test_1:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 10
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 22938.435546875
+      _annual_sharpe: -1.465176635682377
+    _performance_test_2:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 10
+      _uncertainty_multiplier: 0.0
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 31464.9921875
+      _annual_sharpe: 0.9540010988933684
+    _performance_test_3:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 25
+      _uncertainty_multiplier: 0.0
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 29982.662109375
+      _annual_sharpe: 0.8584803191418741
+    _performance_test_4:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 10
+      _uncertainty_multiplier: 0.0
+      _capital_gains_tax: 0.35
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 30507.875
+      _annual_sharpe: 1.02888825646877
+  m1-medium-high-daily-1-with-time-features-and-faster-learning-rate:
+    notes: 'upgrading the hidden_size, attention_head_size, hidden_continuous_size, and learning rate'
+    features:
+      - open
+      - close
+      - high
+      - low
+      - trade_count
+      - volume
+      - vwap
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 60
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 32
+    attention_head_size: 4
+    dropout: 0.1
+    hidden_continuous_size: 16
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 5
+    trainable_params: '69.6k'
+    _train_loss: 2.587998
+    _best_val_loss: 2.878758
+    _best_epoch: 2
+    _performance_test_1:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 50
+      _capital_gains_tax: 0.35
+      _uncertainty_multiplier: 0.0
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 26482.98828125
+      _annual_sharpe: 0.2859471307634816
+    _performance_test_2:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 50
+      _capital_gains_tax: 0.35
+      _uncertainty_multiplier: 0.4
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 24854.0390625
+      _annual_sharpe: -0.5188214102241604
+    _performance_test_3:
+      _test_strategy: SimpleXDaysAheadBuying
+      _test_range: '2025-01-01 - 2026-01-01'
+      _interval_days: 1
+      _num_stocks_purchased: 10
+      _capital_gains_tax: 0.35
+      _uncertainty_multiplier: 0.0
+      _compound_money: True
+      _dont_buy_negative_stocks: True
+      _money_made: 30186.625
+      _annual_sharpe: 0.8968546465922386
+  m1-medium-daily-1-with-time-features-and-faster-learning-rate-fine-tuned:
+    notes: 'increasing dropout rate'
+    fine_tuning_model_id: 'm1-medium-daily-1-with-time-features-and-faster-learning-rate'
+    features:
+      - open
+      - close
+      - high
+      - low
+      - trade_count
+      - volume
+      - vwap
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 60
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 16
+    attention_head_size: 2
+    dropout: 0.3
+    hidden_continuous_size: 8
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 5
+    val_loss: 3.005045
+  m1-high-daily-1-with-time-features-and-faster-learning-rate:
+    notes: 'upgrading the hidden_size, attention_head_size, hidden_continuous_size, and learning rate'
+    features:
+      - open
+      - close
+      - high
+      - low
+      - trade_count
+      - volume
+      - vwap
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 60
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 64
+    attention_head_size: 4
+    dropout: 0.1
+    hidden_continuous_size: 32
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 5
+    total_params: '260 K'
+  m1-medium-with-less-features:
+    notes: ''
+    features:
+      - open
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 60
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 16
+    attention_head_size: 2
+    dropout: 0.1
+    hidden_continuous_size: 8
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 5
+    train_loss: 2.562474
+    best_val_loss: 2.9491 
+  m1-medium-with-less-features-and-longer-lookback:
+    notes: 'trying longer lookback to see if that had any impact on val loss. Did not seem to...'
+    features:
+      - open
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+    train_start: "2020-01-01"
+    train_end: "2024-01-01"
+    val_end: "2025-01-01"
+    test_end: "2026-01-01"
+    max_lookback_period: 180
+    max_prediction_length: 2
+    accelerator: 'mps'
+    devices: 1
+    num_workers: 4
+    batch_size: 2048
+    hidden_size: 16
+    attention_head_size: 2
+    dropout: 0.1
+    hidden_continuous_size: 8
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 50
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 5
+    _best_epoch: 5
+    _best_val_loss: 3.2674
 
 
