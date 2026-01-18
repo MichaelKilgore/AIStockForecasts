@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame
 
-from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
 """
     Provides helpful logging.

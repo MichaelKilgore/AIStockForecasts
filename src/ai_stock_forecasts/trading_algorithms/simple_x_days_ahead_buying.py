@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from ai_stock_forecasts.model.trading_algorithms.base_trading_module import BaseTradingModule
+from ai_stock_forecasts.trading_algorithms.base_trading_module import BaseTradingModule
 
 """
 Simulates purchasing x stocks every y days over the entire predictions df passed.

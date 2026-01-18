@@ -7,20 +7,20 @@ import torch
 from torch.utils.data import DataLoader
 import yaml
 import os
-from ai_stock_forecasts.dynamodb.dynamodb_util import DynamoDBUtil
-from ai_stock_forecasts.model.data.inference_data_module import InferenceDataModule
-from ai_stock_forecasts.model.model.model_module import ModelModule
-from ai_stock_forecasts.model.trading_algorithms.base_trading_module import BaseTradingModule
-from ai_stock_forecasts.model.trading_algorithms.simple_x_days_ahead_buying import SimpleXDaysAheadBuying
+from ai_stock_forecasts.utils.dynamodb_util import DynamoDBUtil
+from ai_stock_forecasts.data.inference_data_module import InferenceDataModule
+from ai_stock_forecasts.model.model_module import ModelModule
+from ai_stock_forecasts.trading_algorithms.base_trading_module import BaseTradingModule
+from ai_stock_forecasts.trading_algorithms.simple_x_days_ahead_buying import SimpleXDaysAheadBuying
 import sys
 
-from ai_stock_forecasts.model.data.training_data_module import TrainingDataModule
+from ai_stock_forecasts.data.training_data_module import TrainingDataModule
 from ai_stock_forecasts.models.order import Order, OrderItem
 
 from alpaca.trading.enums import OrderSide
 
 from ai_stock_forecasts.ordering.order_util import OrderUtil
-from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
 def local_rank() -> int:
     v = os.environ.get("LOCAL_RANK")
@@ -331,12 +331,12 @@ def parse_args():
     parser.add_argument('--config_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
     parser.add_argument('--model_id', type=str, default='m1-medium-high-with-less-features-and-earnings-calendar-features')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=0)
+    parser.add_argument('--run_training', type=bool, default=1)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=0)
     parser.add_argument('--explain_model', type=bool, default=0)
     parser.add_argument('--run_inference', type=bool, default=0)
-    parser.add_argument('--execute_buy', type=bool, default=1)
+    parser.add_argument('--execute_buy', type=bool, default=0)
 
     return parser.parse_args()
 

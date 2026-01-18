@@ -7,8 +7,8 @@ from ai_stock_forecasts.models.order import Order, OrderItem
 from pandas import DataFrame, factorize
 from pytorch_forecasting import TimeSeriesDataSet
 from ai_stock_forecasts.backfill.backfill_features_util import BackfillFeaturesUtil
-from ai_stock_forecasts.data.get_historical_data_util import GetHistoricalDataUtil
-from ai_stock_forecasts.model.data.data_module import DataModule
+from ai_stock_forecasts.utils.get_historical_data_util import GetHistoricalDataUtil
+from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.models.stock_bar import StockBar
 import pandas as pd
 

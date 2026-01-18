@@ -2,10 +2,10 @@ from datetime import datetime, timedelta
 
 from alpaca.data import TimeFrame, TimeFrameUnit
 
-from ai_stock_forecasts.data.get_historical_data_util import GetHistoricalDataUtil
+from ai_stock_forecasts.utils.get_historical_data_util import GetHistoricalDataUtil
 from ai_stock_forecasts.models.historical_data import HistoricalData
 from ai_stock_forecasts.models.stock_bar import StockBar
-from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 import pandas as pd
 
 import time

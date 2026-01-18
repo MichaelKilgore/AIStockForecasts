@@ -5,8 +5,8 @@ from typing import Union
 from alpaca.data import TimeFrame, TimeFrameUnit
 from pandas import DataFrame, factorize, to_numeric
 from pytorch_forecasting import TimeSeriesDataSet
-from ai_stock_forecasts.model.data.data_module import DataModule
-from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+from ai_stock_forecasts.data.data_module import DataModule
+from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 import pandas as pd
 
 
