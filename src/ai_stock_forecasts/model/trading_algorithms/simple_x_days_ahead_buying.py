@@ -20,6 +20,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         self.compound_money: bool = compound_money
         self.dont_buy_negative_stocks: bool = dont_buy_negative_stocks
         self.uncertainty_multiplier: float = uncertainty_multiplier
+        print(f"set trading params to: interval_days: {self.interval_days}, num_stocks_purchased: {self.num_stocks_purchased}, capital_gains_tax: {self.capital_gains_tax}, compound_money: {self.compound_money}, dont_buy_negative_stocks: {self.dont_buy_negative_stocks}, uncertainty_multiplier: {self.uncertainty_multiplier}")
 
 
     """
@@ -27,6 +28,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
 
             "symbol": [ AAPL, AMD, ... ],
             "timestamp": [ ts1, ts2, ... ],
+            "current_y": [ price, price, ... ],
             "y": [ [ ], [ ]... ],
             "y_pred_p30": [ [ ], [ ]... ],
             "y_pred_p50": [ [ ], [ ]... ],
@@ -48,40 +50,15 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             mask = predictions["timestamp"] == current_ts
             filtered = predictions.loc[mask].copy()
 
-            # determine what stocks to buy
-            p30 = np.stack(filtered["y_pred_p30"].to_numpy())
-            p50 = np.stack(filtered["y_pred_p50"].to_numpy())
-            p70 = np.stack(filtered["y_pred_p70"].to_numpy())
-
-            eps = 1e-8
-            start = p50[:, 0]
-            end = p50[:, self.interval_days]
-
-            x = (end - start) / (start + eps) * 100.0
-            band_width_pct = (p70 - p30) / (p30 + eps) * 100.0
-            y = band_width_pct.mean(axis=1)
-
-            """the general idea of this scoring mechanism is that
-               we factor in a combination of which stocks are predicted
-               to rise the most, but also factor in uncertainty, greater
-               distances between p30 and p70 suggest the stock is volatile."""
-            score = x - (y * self.uncertainty_multiplier)
-
-            filtered.loc[:, "x"] = x
-            filtered.loc[:, "z"] = y
-            filtered.loc[:, "score"] = score
-
-            top_x = filtered.sort_values("score", ascending=False).head(self.num_stocks_purchased)
-            if (self.dont_buy_negative_stocks):
-                top_x = top_x[top_x["score"] > 0.0]
+            top_x = self._determine_top_x(filtered)
 
             total_profit = 0
             if len(top_x) > 0:
-                for row in top_x["y"]:
+                for row, curr_price in zip(top_x["y"], top_x["current_y"]):
                     money_to_invest = money if self.compound_money else self.starting_money
                     money_invested_in_this_stock = (money_to_invest / len(top_x))
-                    num_stocks_bought = ( money_invested_in_this_stock / row[0] )
-                    stock_value_now = row[self.interval_days]
+                    num_stocks_bought = ( money_invested_in_this_stock / curr_price )
+                    stock_value_now = row[self.interval_days-1]
                     money_post_sell = (num_stocks_bought * stock_value_now)
                     total_profit += money_post_sell - (money_to_invest / len(top_x))
 
@@ -106,4 +83,51 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         print(f"annual sharpe is: {sharpe}")
 
         return difference, sharpe, p_value
+
+    """
+        We expect predictions in this format (there will only be one timestamp though):
+
+            "symbol": [ AAPL, AMD, ... ],
+            "timestamp": [ ts1 ],
+            "current_y": [ price, price, ... ],
+            "y": [ [ ], [ ]... ],
+            "y_pred_p30": [ [ ], [ ]... ],
+            "y_pred_p50": [ [ ], [ ]... ],
+            "y_pred_p70": [ [ ], [ ]... ],
+    """
+    def generate_buy_list(self, predictions: DataFrame) -> DataFrame:
+        top_x = self._determine_top_x(predictions)
+
+        return top_x
+
+    def _determine_top_x(self, predictions: DataFrame) -> DataFrame:
+        p30 = np.stack(predictions["y_pred_p30"].to_numpy())
+        p50 = np.stack(predictions["y_pred_p50"].to_numpy())
+        p70 = np.stack(predictions["y_pred_p70"].to_numpy())
+
+        current_y = predictions['current_y']
+
+        eps = 1e-8
+        start = current_y
+        end = p50[:, self.interval_days-1]
+
+        x = (end - start) / (start + eps) * 100.0
+        band_width_pct = (p70 - p30) / (p30 + eps) * 100.0
+        y = band_width_pct.mean(axis=1)
+
+        """the general idea of this scoring mechanism is that
+           we factor in a combination of which stocks are predicted
+           to rise the most, but also factor in uncertainty, greater
+           distances between p30 and p70 suggest the stock is volatile."""
+        score = x - (y * self.uncertainty_multiplier)
+
+        predictions.loc[:, "x"] = x
+        predictions.loc[:, "z"] = y
+        predictions.loc[:, "score"] = score
+
+        top_x = predictions.sort_values("score", ascending=False).head(self.num_stocks_purchased)
+        if (self.dont_buy_negative_stocks):
+            top_x = top_x[top_x["score"] > 0.0]
+
+        return top_x
 

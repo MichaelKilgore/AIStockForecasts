@@ -175,6 +175,20 @@ class ModelModule:
         self.convert_raw_predictions_to_simpler_format(df)
         self.s3_util.save_human_readable_predictions(model_id, self.predictionsDF)
 
+    def run_single_day_inference(self, dataloader: DataLoader, df: DataFrame):
+        if not isinstance(self.model, TemporalFusionTransformer):
+            raise Exception('must load in model before loading predictions')
+
+        self.predictions = self.model.predict(
+            dataloader,
+            mode=self.mode,
+            return_x=True,
+            return_y=True,
+            return_index=True,
+        )
+        self.convert_raw_predictions_to_simpler_format(df)
+
+
     def load_raw_predictions(self, model_id: str, df: DataFrame):
         self.predictions = self.s3_util.load_raw_predictions(model_id)
         self.convert_raw_predictions_to_simpler_format(df)
@@ -183,7 +197,7 @@ class ModelModule:
         self.predictionsDF = self.s3_util.load_human_readable_predictions(model_id)
 
     def convert_raw_predictions_to_simpler_format(self, df: DataFrame):
-        timestamps = self._get_decoder_timestamps(df)
+        timestamps = self._get_timestamps(df)
 
         y_pred = self.predictions.output
 
@@ -195,6 +209,10 @@ class ModelModule:
         # symbols: (239, 1)
         # timestamps: (239, 14)
 
+        # pulls the y at timestamp you are predicting from
+        enc_tgt = self.predictions.x["encoder_target"]
+        current_y = enc_tgt[:, -1].detach().cpu().numpy() 
+
         y_true_np = y_true.cpu().numpy()
         y_pred_np = y_pred.cpu().numpy()
         ts_np = timestamps
@@ -205,7 +223,8 @@ class ModelModule:
 
         self.predictionsDF = DataFrame({
             "symbol": symbols,
-            "timestamp": ts_np[:, 0],
+            "timestamp": ts_np,
+            "current_y": current_y,
             "y": list(y_true_np),
             "y_pred_p30": list(p30),
             "y_pred_p50": list(p50),
@@ -237,8 +256,8 @@ class ModelModule:
             if col in self.predictionsDF.columns and self.predictionsDF[col].dtype == "object":
                 self.predictionsDF[col] = self.predictionsDF[col].apply(parse_series_string)
 
-    def _get_decoder_timestamps(self, df) -> np.ndarray:
-        decoder_time_idx = self.predictions.x["decoder_time_idx"].detach().cpu().numpy() # (B, L)
+    def _get_timestamps(self, df) -> np.ndarray:
+        decoder_time_idx = self.predictions.x["decoder_time_idx"].detach().cpu().numpy()
 
         ts_lookup = (
             df[["time_idx", "timestamp"]]
@@ -247,11 +266,10 @@ class ModelModule:
             .sort_index()
         )
 
-        flat = decoder_time_idx.reshape(-1)                  # (B*L,)
-        timestamps_flat = ts_lookup.reindex(flat).to_numpy() # aligns by index, preserves order
+        current_time_idx = decoder_time_idx[:, 0] - 1
+        current_timestamps = ts_lookup.reindex(current_time_idx).to_numpy()
 
-        timestamps = timestamps_flat.reshape(decoder_time_idx.shape)  # (B, L)
-        return timestamps
+        return current_timestamps
 
     def interpret_predictions(self, dataloader: DataLoader, output_path: str = ''):
         if not isinstance(self.model, TemporalFusionTransformer):

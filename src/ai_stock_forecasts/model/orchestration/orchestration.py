@@ -6,12 +6,19 @@ from pytorch_forecasting import TimeSeriesDataSet
 from torch.utils.data import DataLoader
 import yaml
 import os
+from ai_stock_forecasts.dynamodb.dynamodb_util import DynamoDBUtil
+from ai_stock_forecasts.model.data.inference_data_module import InferenceDataModule
 from ai_stock_forecasts.model.model.model_module import ModelModule
+from ai_stock_forecasts.model.trading_algorithms.base_trading_module import BaseTradingModule
 from ai_stock_forecasts.model.trading_algorithms.simple_x_days_ahead_buying import SimpleXDaysAheadBuying
 import sys
 
 from ai_stock_forecasts.model.data.training_data_module import TrainingDataModule
+from ai_stock_forecasts.models.order import Order, OrderItem
 
+from alpaca.trading.enums import OrderSide
+
+from ai_stock_forecasts.ordering.order_util import OrderUtil
 
 def local_rank() -> int:
     v = os.environ.get("LOCAL_RANK")
@@ -80,6 +87,8 @@ class Orchestration:
         else:
             self.fine_tuning_model_id = None
 
+        self.db_util = DynamoDBUtil()
+        self.order_util = OrderUtil()
 
     def run_training(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
@@ -138,9 +147,19 @@ class Orchestration:
         except:
             raise Exception('You must run batch inference before attempting to run evaluation')
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.0, dont_buy_negative_stocks=False)
+        # self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.1, dont_buy_negative_stocks=True)
 
-        self.trading_algorithm.simulate(self.model_module.predictionsDF)
+        # self.trading_algorithm.simulate(self.model_module.predictionsDF)
+
+        results = []
+        for i in list([1,2]):
+            for j in list([10,25,50]):
+                for k in list([0.1, 0.2, 0.3, 0.4, 0.5]):
+                    self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=i, num_stocks_purchased=j, capital_gains_tax=0.35, uncertainty_multiplier=k, dont_buy_negative_stocks=True)
+
+                    results.append(([i,j,k], self.trading_algorithm.simulate(self.model_module.predictionsDF)))
+                    print(results[-1])
+        print(results)
 
     def explain_model(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
@@ -157,8 +176,110 @@ class Orchestration:
 
         self._load_model()
 
-        self.model_module.interpret_predictions(self.training_data_module.train_dataloader)
+        if (not isinstance(self.training_data_module.train_dataloader, DataLoader)):
+            raise Exception('something went wrong...')
+        else:
+            self.model_module.interpret_predictions(self.training_data_module.train_dataloader)
 
+    def run_inference(self):
+        self.inference_data_module = InferenceDataModule(self.symbols, self.features, self.time_frame, 
+                                                         self.max_lookback_period, self.max_prediction_length)
+
+        self.model_module = ModelModule()
+
+        # TODO: Sometimes when models are trained on different hardware, loading in the model this way doesn't work.
+        self.model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
+ 
+        self.inference_data_module.construct_inference_dataset(self.model_module.model.hparams["dataset_parameters"])
+        self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+
+        self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
+
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.3, dont_buy_negative_stocks=True)
+
+        stocks = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF)
+
+        print(stocks)
+
+    def execute_buy(self, testing: bool=False):
+        if not self.order_util.is_stock_market_open() or testing:
+            print(f'Stock market not open right now, returning...')
+            return
+
+        # get latest order details
+        latest_order = self.db_util.get_latest_order(self.model_id)
+        money_to_invest = latest_order.total_money_invested if latest_order != None else 25000
+
+        self.inference_data_module = InferenceDataModule(self.symbols, self.features, self.time_frame, 
+                                                 self.max_lookback_period, self.max_prediction_length)
+
+        # determine trading strategy
+        self._init_trading_strategy() 
+
+        # determine if we have waited long enough (interval_days)
+        if not testing and (latest_order is not None and not self.inference_data_module.is_it_time_to_order_again(latest_order.order_timestamp, self.interval_days)):
+            print(f'Based on the interval days for this trading strategy: {self.interval_days}, its too soon to execute a trade, returning early...')
+            return
+
+        # sell previous order
+        new_money_left = money_to_invest
+        if latest_order is not None:
+            order_items = [
+                OrderItem(r.symbol, round(r.quantity, 2), OrderSide.SELL)
+                for r in latest_order.order_items
+            ]
+            sell_order = Order(self.model_id, datetime.now(), money_to_invest, order_items=order_items)
+            new_money_left = self.inference_data_module.update_money_to_invest(sell_order)
+            sell_order.total_money_invested = round(float(new_money_left), 2)
+            self.db_util.upload_order(sell_order)
+            self.order_util.close_all_positions()
+
+        # execute trading strategy
+        self.model_module = ModelModule()
+
+        self.model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
+ 
+        self.inference_data_module.construct_inference_dataset(self.model_module.model.hparams["dataset_parameters"])
+        self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+
+        self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
+
+        top_x = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF)
+
+        money_to_invest_in_each = float(new_money_left) / len(top_x)
+
+        top_x['quantity'] = money_to_invest_in_each / top_x['current_y']
+
+        order_items = [
+            OrderItem(r.symbol, round(r.quantity, 2), OrderSide.BUY)
+            for r in top_x.itertuples(index=False)
+        ]
+
+        # upload orders to db
+        order = Order(self.model_id, datetime.now(), round(new_money_left, 2), order_items=order_items)
+        self.db_util.upload_order(order)
+
+        # execute orders in alpaca
+        self.order_util.place_order(order)
+
+
+    def _init_trading_strategy(self) -> BaseTradingModule:
+        strat = self.config['preferred_trading_strategy']
+
+        performance_test = self.config[strat]['_test_strategy'] 
+
+        self.interval_days = self.config[strat]['_interval_days']
+
+        if performance_test == 'SimpleXDaysAheadBuying':
+            self.trading_algorithm = SimpleXDaysAheadBuying(
+                                        interval_days=self.interval_days, 
+                                        num_stocks_purchased=self.config[strat]['_num_stocks_purchased'], 
+                                        capital_gains_tax=self.config[strat]['_capital_gains_tax'],
+                                        uncertainty_multiplier=self.config[strat]['_uncertainty_multiplier'],
+                                        compound_money=self.config[strat]['_compound_money'],
+                                        dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'])
+        else:
+            raise Exception('The trading strategy specified is not supported')
 
     def _load_model(self, model_id='', modify_dropout=False):
         model_id = model_id if model_id != '' else self.model_id
@@ -166,25 +287,27 @@ class Orchestration:
             try:
                 self.model_module.load_model_from_checkpoint(model_id, self.accelerator)
             except:
-                if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet)):
+                dataset = self.training_data_module.training_dataset
+ 
+                if (not isinstance(dataset, TimeSeriesDataSet)):
                     raise Exception('something went wrong...')
                 else:
                     self.model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
-                                                                          self.training_data_module.training_dataset,
-                                                                          self.learning_rate, self.hidden_size, 
-                                                                          self.attention_head_size, self.dropout,
-                                                                          self.hidden_continuous_size, self.lstm_layers, 
-                                                                          self.reduce_on_plateau_patience)
+                                                                          dataset, self.learning_rate,
+                                                                          self.hidden_size, self.attention_head_size,
+                                                                          self.dropout, self.hidden_continuous_size,
+                                                                          self.lstm_layers, self.reduce_on_plateau_patience)
         else:
-            if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet)):
+            dataset = self.training_data_module.training_dataset
+ 
+            if (not isinstance(dataset, TimeSeriesDataSet)):
                 raise Exception('something went wrong...')
             else:
                 self.model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
-                                                                      self.training_data_module.training_dataset,
-                                                                      self.learning_rate, self.hidden_size, 
-                                                                      self.attention_head_size, self.dropout,
-                                                                      self.hidden_continuous_size, self.lstm_layers, 
-                                                                      self.reduce_on_plateau_patience)
+                                                                      dataset, self.learning_rate,
+                                                                      self.hidden_size, self.attention_head_size,
+                                                                      self.dropout, self.hidden_continuous_size,
+                                                                      self.lstm_layers, self.reduce_on_plateau_patience)
 
 
 def parse_args():
@@ -192,7 +315,14 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='m1-medium-with-less-features-and-longer-lookback')
+    parser.add_argument('--model_id', type=str, default='m1-medium-high-with-less-features-and-earnings-calendar-features')
+    # 0 = False, 1 = True
+    parser.add_argument('--run_training', type=bool, default=0)
+    parser.add_argument('--run_batch_inference', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--explain_model', type=bool, default=0)
+    parser.add_argument('--run_inference', type=bool, default=0)
+    parser.add_argument('--execute_buy', type=bool, default=1)
 
     return parser.parse_args()
 
@@ -211,10 +341,18 @@ if __name__ == '__main__':
 
     orc = Orchestration(symbols, args.model_id, args.config_path)
 
-    orc.run_training()
-    #orc.run_batch_inference()
-    #orc.run_evaluation()
-    #orc.explain_model()
+    if args.run_training:
+        orc.run_training()
+    if args.run_batch_inference:
+        orc.run_batch_inference()
+    if args.run_evaluation:
+        orc.run_evaluation()
+    if args.explain_model:
+        orc.explain_model()
+    if args.run_inference:
+        orc.run_inference()
+    if args.execute_buy:
+        orc.execute_buy()
 
 
 

@@ -13,6 +13,10 @@ class BaseTradingModule:
     def simulate(self, predictions: DataFrame) -> tuple:
         pass
 
+    @abstractmethod
+    def generate_buy_list(self, predictions: DataFrame) -> list[str]:
+        pass
+
     """ assumes we can generate 5% returns annually risk free.
         sharpe_annual > 1 is considered good, but greater than 2 or even 3 is ideal.
         p_two_sided of 0.11 for example means there is an 11% chance that these results could've been generated at random.

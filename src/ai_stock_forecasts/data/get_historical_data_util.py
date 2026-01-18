@@ -1,4 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from pandas import Series
+import requests
 
 from dotenv import load_dotenv
 import os
@@ -7,6 +9,8 @@ from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
 
 from ai_stock_forecasts.models.stock import Stock
 from ai_stock_forecasts.models.stock_bar import StockBar
+
+from finance_calendars import finance_calendars as fc
 
 
 class GetHistoricalDataUtil:
@@ -33,6 +37,7 @@ class GetHistoricalDataUtil:
         return res
 
     def get_historical_stock_prices(self, stocks: list[str], start: datetime, end: datetime, time_frame: TimeFrame = TimeFrame(amount=1, unit=TimeFrameUnit.Day)) -> list[StockBar]:
+        print(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
         multisymbol_request_params = StockBarsRequest(symbol_or_symbols=stocks,
                                                       timeframe=time_frame,
                                                       start=start,
@@ -51,11 +56,35 @@ class GetHistoricalDataUtil:
 
         return res
 
+    """
+        returns DataFrame Series like:
+
+        symbol value
+        RBLX    -192.59
+    """
+    def get_surprise(self, date: datetime = datetime(2021, 8, 16, 0, 0)) -> Series:
+        earnings = fc.get_earnings_by_date(date)
+        if len(earnings) != 0:
+            if 'surprise' in earnings.columns:
+                return earnings['surprise']
+            else:
+                return Series(0.0, index=earnings.index, name="surprise")
+        else:
+            return Series()
+
 if __name__ == "__main__":
     obj = GetHistoricalDataUtil()
 
-    res = obj.get_historical_stock_prices(["SPY"], datetime(2020, 1, 1), datetime(2025, 11, 1))
+    # curr = datetime(2025, 10, 30)
+    #curr = datetime(2020, 4, 28)
+    curr = datetime(2026, 1, 14)
+    res = obj.get_surprise(curr)
+    print(res)
+    #print(res.index[res.index.duplicated()].unique())
+    #print(res['KNDI'])
+    # res = obj.get_historical_stock_prices(["SPY"], datetime(2020, 1, 1), datetime(2025, 11, 1))
 
-    res.sort()
-    for val in res:
-        print(val)
+    # res.sort()
+    # for val in res:
+    #     print(val)
+

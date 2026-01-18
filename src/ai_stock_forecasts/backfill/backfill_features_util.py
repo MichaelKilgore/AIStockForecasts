@@ -6,8 +6,11 @@ from ai_stock_forecasts.data.get_historical_data_util import GetHistoricalDataUt
 from ai_stock_forecasts.models.historical_data import HistoricalData
 from ai_stock_forecasts.models.stock_bar import StockBar
 from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+import pandas as pd
 
 import time
+
+import sys
 
 class BackfillFeaturesUtil:
     def __init__(self):
@@ -116,19 +119,106 @@ class BackfillFeaturesUtil:
 
         return records
 
+    def backfill_surprise_features(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), return_df: bool = False):
+        curr = start
+        dfs = []
+        delta = (end - start).days
+        print('loading surprise features...')
+        while curr != end + timedelta(days=1):
+            surprise_series: pd.Series = self.get_historical_data_util.get_surprise(curr)
+
+            surprise_series = surprise_series[~surprise_series.index.duplicated(keep="first")]
+
+            sys.stdout.write('\r')
+            curr_delta = delta - (end - curr).days
+            sys.stdout.write("[%-20s] %d%%" % ('='*int((curr_delta / delta)*20), (curr_delta / delta)*100))
+            sys.stdout.flush()
+
+            # date_times = 
+            date_times = None
+            if time_frame.unit_value == TimeFrameUnit.Day:
+                date_times = pd.date_range(curr, freq='D', periods=1)
+            elif time_frame.unit_value == TimeFrameUnit.Minute and time_frame.amount_value == 10:
+                date_times = pd.date_range(curr, freq='10min', periods=144)
+            elif time_frame.unit_value == TimeFrameUnit.Hour and time_frame.amount_value == 1:
+                date_times = pd.date_range(curr, freq='h', periods=24)
+            else:
+                raise Exception(f'The time frame obj {time_frame} is not supported for this yet')
+
+            df = (
+                pd.MultiIndex.from_product([symbols, date_times], names=['symbol', 'timestamp'])
+                    .to_frame(index=False)
+            )
+            df['surprise'] = df['symbol'].map(surprise_series)
+            df['is_earnings_day'] = df['symbol'].isin(surprise_series.index)
+            df['surprise'] = pd.to_numeric(df['surprise'], errors='coerce').fillna(0.0)
+
+            dfs.append(df)
+
+            curr = curr + timedelta(days=1)
+            time.sleep(0.2)
+
+        print("")
+        final_df = pd.concat(dfs, ignore_index=True)
+
+        if return_df:
+            return final_df
+
+        long_df = final_df.melt(
+            id_vars=["symbol", "timestamp"],
+            value_vars=["surprise", "is_earnings_day"],
+            var_name="feature",
+            value_name="value",
+        )
+        is_flag = long_df["feature"].eq("is_earnings_day")
+        long_df.loc[is_flag, "value"] = long_df.loc[is_flag, "value"].astype(bool).astype(str)
+        long_df.loc[~is_flag, "value"] = pd.to_numeric(long_df.loc[~is_flag, "value"], errors="coerce").fillna(0.0).astype(str)
+
+        type_map = {
+            "surprise": "float",
+            "is_earnings_day": "bool",
+        }
+        long_df["type"] = long_df["feature"].map(type_map)
+
+        long_df["date"] = pd.to_datetime(long_df["timestamp"])
+
+        records = []
+        updated_timestamp = datetime.now()
+        for r in long_df.itertuples(index=False):
+            records.append(
+                HistoricalData(
+                    symbol=r.symbol,
+                    timestamp=pd.Timestamp(r.timestamp).to_pydatetime()
+                        if isinstance(r.timestamp, pd.Timestamp) else r.timestamp,
+                    feature=r.feature,
+                    value=str(r.value),
+                    type=r.type,
+                    updated_timestamp=updated_timestamp,
+                    time_frame=time_frame,
+                    date=pd.Timestamp(r.date).to_pydatetime()
+                        if isinstance(r.date, pd.Timestamp) else r.date,
+                )
+            )
+
+        self.s3_util.upload_features_data(records, time_frame)
+
 if __name__ == "__main__":
     obj = BackfillFeaturesUtil()
 
-    with open("src/ai_stock_forecasts/constants/symbols.txt", "r") as f:
+    with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
+    # with open('../constants/symbols.txt', 'r') as f:
         symbols = [line.strip() for line in f]
 
     symbols.append('SPY')
 
     # TODO: We stopped the program at 391, continue on to finish last 100 from step 14.
-    i = 13*30
-    while i < len(symbols):
-        obj.backfill_base_features(['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap'], symbols[i:min(i+30, len(symbols))], datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(10, TimeFrameUnit.Minute), True)
-        i += 30
+    # i = 13*30
+    # while i < len(symbols):
+    #     obj.backfill_base_features(['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap'], symbols[i:min(i+30, len(symbols))], datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(10, TimeFrameUnit.Minute), True)
+    #     i += 30
+
+    obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+
 
     #obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(1, TimeFrameUnit.Day), True)
 

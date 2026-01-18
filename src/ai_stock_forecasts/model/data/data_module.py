@@ -1,21 +1,26 @@
 from abc import abstractmethod
+from typing import Union
 
 from alpaca.data import TimeFrame, TimeFrameUnit
 from pandas import DataFrame, Series
 from pytorch_forecasting import NaNLabelEncoder
 
 class DataModule:
-    def __init__(self, symbols: list[str], features: list[str], time_frame: TimeFrame,
+    def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
                  max_lookback_period: int, max_prediction_length: int):
         self.df: DataFrame = DataFrame()
         self.categorical_encoders = {}
         self.known_reals = ['timestamp']
-        self.unknown_reals = ['close', 'high', 'hour_of_day', 'low', 'open', 'trade_count', 'volume', 'vwap']
+        self.unknown_reals = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap', 'surprise']
         self.unknown_categoricals = []
-        self.known_categoricals = ['year', 'month', 'day_of_month', 'day_of_week', 'hour_of_day', 'minute_of_day']
+        self.known_categoricals = ['year', 'month', 'day_of_month', 'day_of_week', 'hour_of_day', 'minute_of_day', 'is_earnings_day']
+
+        self.alpaca_sourced_features = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap']
         
         self.symbols = symbols
         self.features = features
+        if isinstance(time_frame, str):
+            time_frame = TimeFrame(1, TimeFrameUnit(time_frame))
         self.time_frame = time_frame
         self.max_lookback_period = max_lookback_period
         self.max_prediction_length = max_prediction_length
@@ -76,5 +81,9 @@ class DataModule:
     def _get_unknown_categoricals(self):
         base = {'symbol', 'time_idx'}
         return [f for f in self.features if f in self.unknown_reals and f not in base]
+
+    def _get_alpaca_sourced_features(self):
+        base = {'symbol', 'time_idx'}
+        return [f for f in self.features if f in self.alpaca_sourced_features and f not in base]
 
 

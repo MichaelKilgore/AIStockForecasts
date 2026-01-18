@@ -7,6 +7,7 @@ from pandas import DataFrame, factorize, to_numeric
 from pytorch_forecasting import TimeSeriesDataSet
 from ai_stock_forecasts.model.data.data_module import DataModule
 from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
+import pandas as pd
 
 
 """
@@ -16,9 +17,6 @@ from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
 class TrainingDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
                  max_lookback_period: int, max_prediction_length: int, is_df_cached: bool):
-        if isinstance(time_frame, str):
-            time_frame = TimeFrame(1, TimeFrameUnit(time_frame))
-
         self.s3_util = S3ParquetUtil()
 
         """
@@ -60,9 +58,29 @@ class TrainingDataModule(DataModule):
         self.df = pivoted_features_data
 
     def _pivot_features_data(self, df: DataFrame):
+
+        # strings 'True' and 'False' don't automatically convert to numeric.
+        bool_mask = df['value'].isin(["True", "False"])
+        df['value'] = df['value'].where(~bool_mask, df['value'].map({'True': 1, 'False': 0}))
+
         df['value'] = to_numeric(df['value'])
+
+        """for some of the feature data we don't have the same hour, min listed in the timestamp
+            so we have to make sure we are grouping by correct time frame unit.
+
+            TODO: we don't have support for min or hour timeframe, grouping seemed more confusing so leaving unsupported for now."""
+        if self.time_frame.unit_value == TimeFrameUnit.Day:
+            # df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True).dt.tz_convert(None).dt.normalize()
+            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.normalize()
+        else:
+            raise Exception(f'TimeFrame: {self.time_frame} not supported')
+
         df = df.drop_duplicates(subset=['symbol', 'timestamp', 'feature'], keep='first')
         wide = df.pivot(index=['symbol', 'timestamp'], columns='feature', values='value').reset_index()
+
+        # we only want rows where 
+        wide = wide[wide['open'].notna()]
+
         return wide
 
     def construct_training_and_validation_datasets(self, train_start: datetime, train_end: datetime,
