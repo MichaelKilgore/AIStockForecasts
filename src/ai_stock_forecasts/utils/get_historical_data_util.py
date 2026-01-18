@@ -11,7 +11,7 @@ from ai_stock_forecasts.models.stock import Stock
 from ai_stock_forecasts.models.stock_bar import StockBar
 
 from finance_calendars import finance_calendars as fc
-
+from alpaca.data.enums import DataFeed
 
 class GetHistoricalDataUtil:
     def __init__(self):
@@ -42,6 +42,7 @@ class GetHistoricalDataUtil:
                                                       timeframe=time_frame,
                                                       start=start,
                                                       end=end,
+                                                      feed=DataFeed.IEX,
                                                       adjustment="split")
 
         multisymbol_quotes = self.stock_client.get_stock_bars(multisymbol_request_params)
