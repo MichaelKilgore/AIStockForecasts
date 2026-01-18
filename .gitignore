@@ -6,3 +6,4 @@
 **/*.ckpt
 **/*.csv
 model.tar.gz
+*.pem

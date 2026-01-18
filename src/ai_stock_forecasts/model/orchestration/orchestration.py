@@ -3,6 +3,7 @@ import argparse
 from alpaca.data import TimeFrame, TimeFrameUnit
 from datetime import datetime, timezone
 from pytorch_forecasting import TimeSeriesDataSet
+import torch
 from torch.utils.data import DataLoader
 import yaml
 import os
@@ -19,6 +20,7 @@ from ai_stock_forecasts.models.order import Order, OrderItem
 from alpaca.trading.enums import OrderSide
 
 from ai_stock_forecasts.ordering.order_util import OrderUtil
+from ai_stock_forecasts.s3.s3_util import S3ParquetUtil
 
 def local_rank() -> int:
     v = os.environ.get("LOCAL_RANK")
@@ -89,6 +91,7 @@ class Orchestration:
 
         self.db_util = DynamoDBUtil()
         self.order_util = OrderUtil()
+        self.s3_util = S3ParquetUtil()
 
     def run_training(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
@@ -202,7 +205,7 @@ class Orchestration:
         print(stocks)
 
     def execute_buy(self, testing: bool=False):
-        if not self.order_util.is_stock_market_open() or testing:
+        if not testing and not self.order_util.is_stock_market_open():
             print(f'Stock market not open right now, returning...')
             return
 
@@ -237,10 +240,21 @@ class Orchestration:
         # execute trading strategy
         self.model_module = ModelModule()
 
-        self.model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
+        with self.s3_util.load_best_model_checkpoint(self.model_id) as ckpt_path:
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            hp = ckpt["hyper_parameters"]
+            params = hp["dataset_parameters"]
  
-        self.inference_data_module.construct_inference_dataset(self.model_module.model.hparams["dataset_parameters"])
+        self.inference_data_module.construct_inference_dataset(params)
         self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+
+
+        self.model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator, 
+                                                              self.inference_data_module.inference_dataset, self.learning_rate,
+                                                              self.hidden_size, self.attention_head_size,
+                                                              self.dropout, self.hidden_continuous_size,
+                                                              self.lstm_layers, self.reduce_on_plateau_patience)
+
 
         self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
 
@@ -352,7 +366,7 @@ if __name__ == '__main__':
     if args.run_inference:
         orc.run_inference()
     if args.execute_buy:
-        orc.execute_buy()
+        orc.execute_buy(True)
 
 
 
