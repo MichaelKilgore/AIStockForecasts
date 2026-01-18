@@ -6,6 +6,66 @@ This package orchestrates feature backfilling, training of TemporalFusionTransfo
   <img src="images/hld.png">
 </div>
 
+## Getting Started
+
+1. create an aws account and the following resources:
+  * dynamodb table
+  * s3 bucket
+  * aws user (get access keys)
+
+2. create a .env file in src/ folder:
+
+```
+ALPACA_KEY=*********** ( go to https://app.alpaca.markets/dashboard/overview for keys)
+ALPACA_SECRET=*****************
+REGION_NAME=us-east-2
+ACCESS_KEY=******* ( create a user in aws with perms and pull access key from there )
+SECRET_ACCESS_KEY=********** ( create a user in aws with perms and pull access key from there )
+S3_BUCKET_NAME=ai-stock-forecasts ( create a bucket in s3 )
+ATHENA_TABLE_S3_PREFIX=historical_data_v2 ( prefix of where features are stored in s3 )
+S3_MODEL_OUTPUT_BUCKET_NAME=sagemaker-us-east-2-***** ( bucket where we upload model artifacts from training locally )
+ORDERS_TABLE=orders_table
+```
+
+3. run the following command to include ai_stock_forecasts library in python3 build:
+
+```
+export PYTHONPATH="$PWD/src:$PYTHONPATH"
+```
+
+4. backfill features via BackfillFeaturesUtil (View __main__ from file for more context). For example:
+
+```
+obj = BackfillFeaturesUtil()
+
+with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
+    symbols = [line.strip() for line in f]
+
+obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2026, 1, 1), TimeFrame(1, TimeFrameUnit.Day), True)
+
+obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+```
+
+Will backfill daily interval data for the following features: open, close, high, low, open, trade_count, volume, vwap, surprise, is_earnings_day.
+
+5. Finally you can run training via the Orchestration class (View __main__ from file for more context). For example:
+
+```
+with open(args.symbols_path, "r") as f:
+    symbols = [line.strip() for line in f]
+
+if os.environ.get("SM_MODEL_DIR") is None:
+    os.environ['SM_MODEL_DIR'] = './'
+    os.environ['LOCAL_RANK'] = '0'
+    os.environ['RANK'] = '0'
+
+orc = Orchestration(symbols, args.model_id, args.config_path)
+
+orc.run_training()
+```
+
+6. (Optional) Create an athena table that points to the backfilled features data. Helpful for analyzing your data.
+
 ## Key components
 
 ### Orchestration
@@ -20,5 +80,36 @@ The orchestration class divides all the main functionality into 4 distinct opera
   * After batch inference was complete now we can actually simulate a trading strategy based on those predictions. For example our trading strategy could be buy and sell the top 10 stocks with the highest forecasted change in price over the entire period. We would then simulate that strategy over say 1 year and then calculate the return from that strategy and the sharpe ratio / sharpe p value's.
 * Executing Trading
   * Finally after we've decided on a model and trading strategy we then can actually run our strategy daily. This function will pull your model artifact, pull necessary data to run inference for one day, run inference, then finally decide what stocks to buy based on the results. Then it will actually execute the buy order and also sell out any existing stocks owned. Finally it will record all the executions its done in dynamoDB
+
+### Backfill
+
+In order to run training we also need features data. To do this we run backfills which pull features data from external sources and uploads them to s3. We could technically pull directly from the source, however for training we potentially use a lot of a data so its better to package the data in s3 for re-use instead of calling all our external data sources every time we need to run training. We do this with the BackfillFeaturesUtil which pulls the data from external sources and uploads to s3 in the following uniform format:
+
+```
+timestamp: timestamp
+value: string
+type: string
+updated_timestamp: timestamp
+date: date
+symbol: string
+feature: string
+time_frame: string
+```
+
+This uniform format makes it easy for us to onboard new features because as soon as the feature is onboarded we can immediately pull the data for training.
+
+### Model
+
+The ModelModule contains all the logic for running training and inference.
+
+### Data Modules
+
+We have two data modules which pull necessary data and constructs time series datasets and dataloaders:
+  * **TrainingDataModule** pulls backfilled data from s3 and constructs the dataloaders.
+  * **InferenceDataModule** pulls data directly from external sources and constructs the dataloaders that way.
+
+## Additional Tips
+
+* M1 mac seems to be more efficient for training than some of the smaller instances such as g4dn.xlarge, and g4dn.2xlarge. My recommendation is that unless you are gonna use an instance with a GPU at minimum its not worth running training via sagemaker. View some of the existing config_id's in configs.yaml file all the ids prefixed with m1 were run on a M1 Pro in under 3 hours.
 
 

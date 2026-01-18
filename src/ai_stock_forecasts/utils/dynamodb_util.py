@@ -34,7 +34,10 @@ class DynamoDBUtil:
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_access_key,
         )
-        self.order_table = self.db.Table('orders_table')
+
+        self._orders_table = os.getenv('ORDERS_TABLE')
+
+        self.order_table = self.db.Table(self._orders_table)
 
         self.trading_client = TradingClient(self._alpaca_key, self._alpaca_secret, paper=True)
 
