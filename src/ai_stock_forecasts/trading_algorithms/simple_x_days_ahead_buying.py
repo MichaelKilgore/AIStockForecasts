@@ -1,3 +1,4 @@
+from typing import DefaultDict
 from pandas import DataFrame
 import numpy as np
 import pandas as pd
@@ -37,6 +38,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
     def simulate(self, predictions: DataFrame) -> tuple:
         period_returns = []
         total_money = []
+        money_made_per_day = DefaultDict(int)
         money = self.starting_money
         timestamps = (
             pd.Series(predictions["timestamp"])
@@ -66,6 +68,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             total_money.append(money)
             # print(f"Total Profit (investing $500 per stock): {total_profit}")
             money += total_profit
+            money_made_per_day[current_ts.day_name()] += total_profit
 
             # go to 7 days later
             i = timestamps[timestamps == current_ts].index[0]
@@ -78,6 +81,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         money_left_post_tax = money - (absolute_difference*self.capital_gains_tax)
         difference = ((money_left_post_tax - self.starting_money) / self.starting_money) * 100
         print(f"money left post tax: {money_left_post_tax}")
+        print(f"money made per day: {money_made_per_day}")
 
         sharpe, p_value = self._calculate_sharpe_ratio_and_p_value(period_returns)
         print(f"annual sharpe is: {sharpe}")

@@ -1,8 +1,12 @@
 
 import os
+from typing import Union
 from lightning.pytorch import Callback, Trainer
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_forecasting import QuantileLoss, TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting import EncoderNormalizer, QuantileLoss, TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting.models.temporal_fusion_transformer.tuning import optimize_hyperparameters
+from pytorch_forecasting.tuning.tuner import Tuner
+
 import torch
 import json
 from torch.utils.data import DataLoader
@@ -44,18 +48,18 @@ class StepPrint(Callback):
 
 
 class ModelModule:
-    def __init__(self):
+    def __init__(self, loss=QuantileLoss(quantiles=[0.3, 0.5, 0.7])):
         self.s3_util = S3ParquetUtil()
 
         self.model_dir = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
         self.ckpt_dir = os.path.join(self.model_dir, "checkpoints")
 
         self.model = None
-        self._construct_loss()
+        self._construct_loss(loss)
         self._construct_base_callbacks()
 
-    def _construct_loss(self):
-        self.loss = QuantileLoss(quantiles=[0.3, 0.5, 0.7])
+    def _construct_loss(self, loss):
+        self.loss = loss
         self.output_size = len(self.loss.quantiles)
         self.mode = "quantiles"
 
@@ -93,7 +97,8 @@ class ModelModule:
                      hidden_continuous_size: int, lstm_layers: int,
                      reduce_on_plateau_patience: int, max_epochs: int,
                      accelerator: str, devices: int,
-                     train_dataloader: DataLoader, val_dataloader: DataLoader):
+                     train_dataloader: DataLoader, val_dataloader: DataLoader,
+                     gradient_clip_val: Union[None, float]):
 
 
         if (not isinstance(self.model, TemporalFusionTransformer)):
@@ -120,6 +125,7 @@ class ModelModule:
             devices=devices,
             strategy="ddp" if devices > 1 else "auto",
             callbacks=self.callbacks,
+            gradient_clip_val=gradient_clip_val,
         )
 
         self.trainer.fit(self.model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
@@ -160,7 +166,7 @@ class ModelModule:
             ckpt = torch.load(ckpt_path, map_location=map_location, weights_only=False)
             self.model.load_state_dict(ckpt['state_dict'], strict=False)
 
-    def run_batch_inference(self, dataloader: DataLoader, model_id: str, df: DataFrame):
+    def run_batch_inference(self, dataloader: DataLoader, model_id: str, df: DataFrame, save_predictions: bool=True):
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
@@ -171,9 +177,11 @@ class ModelModule:
             return_y=True,
             return_index=True,
         )
-        self.s3_util.save_raw_predictions(model_id, self.predictions)
+        if save_predictions:
+            self.s3_util.save_raw_predictions(model_id, self.predictions)
         self.convert_raw_predictions_to_simpler_format(df)
-        self.s3_util.save_human_readable_predictions(model_id, self.predictionsDF)
+        if save_predictions:
+            self.s3_util.save_human_readable_predictions(model_id, self.predictionsDF)
 
     def run_single_day_inference(self, dataloader: DataLoader, df: DataFrame):
         if not isinstance(self.model, TemporalFusionTransformer):
@@ -231,6 +239,17 @@ class ModelModule:
             "y_pred_p70": list(p70),
         })
 
+    def plot_mape_by_symbol(self):
+        self.mapeResultDF = self.predictionsDF.copy()
+        self.mapeResultDF['mape'] = ((self.mapeResultDF['y'] - self.mapeResultDF['y_pred_p50']).abs() / self.mapeResultDF['y']) * 100
+        self.mapeResultDF = self.mapeResultDF.assign( mape_first=self.mapeResultDF["mape"].apply(lambda x: float(np.asarray(x).ravel()[0])) )
+        self.mapeResultDF = self.mapeResultDF.groupby(['symbol']).mean()
+        self.mapeResultDF = self.mapeResultDF.sort_values('mape_first', ascending=False)
+        self.mapeResultDF = self.mapeResultDF.reset_index(drop=False)
+        self.mapeResultDF[['symbol', 'mape_first']].plot(x='symbol', y='mape_first')
+        plt.show()
+
+
     def upload_checkpoints_to_s3(self, model_id: str):
         self.s3_util.upload_checkpoints(self.ckpt_dir, self.model_dir, model_id)
 
@@ -255,6 +274,52 @@ class ModelModule:
         for col in ["y", "y_pred_p30", "y_pred_p50", "y_pred_p70"]:
             if col in self.predictionsDF.columns and self.predictionsDF[col].dtype == "object":
                 self.predictionsDF[col] = self.predictionsDF[col].apply(parse_series_string)
+
+    def find_optimal_hyperparameters(self, train_dataloader: DataLoader, val_dataloader: DataLoader):
+        torch.serialization.add_safe_globals([EncoderNormalizer])
+        study = optimize_hyperparameters(
+            train_dataloader,
+            val_dataloader,
+            model_path="optuna_tft",
+            n_trials=30,
+            max_epochs=20,
+            gradient_clip_val_range=(0.01, 1.0),
+            hidden_size_range=(16, 128),
+            hidden_continuous_size_range=(8, 64),
+            attention_head_size_range=(1, 8),
+            dropout_range=(0.1, 0.5),
+            learning_rate_range=(1e-4, 1e-2),
+            loss=self.loss,
+            reduce_on_plateau_patience=4,
+            use_learning_rate_finder=True,
+        )
+
+        print("Best trial value:", study.best_trial.value)
+        print("Best parameters:")
+        for k, v in study.best_trial.params.items():
+            print(f"  {k}: {v}")
+
+    def find_optimal_learning_rate(self, train_dataloader: DataLoader, val_dataloader: DataLoader,
+                                   max_epochs: int, accelerator: str, devices: int):
+        self.trainer = Trainer(
+            max_epochs=max_epochs,
+            accelerator=accelerator,
+            devices=devices,
+            strategy="ddp" if devices > 1 else "auto",
+            callbacks=self.callbacks,
+        )
+
+        res = Tuner(self.trainer).lr_find(
+            self.model,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=val_dataloader,
+            max_lr=10.0,
+            min_lr=1e-6,
+        )
+
+        print(f"suggested learning rate: {res.suggestion()}")
+        fig = res.plot(show=True, suggest=True)
+        fig.show()
 
     def _get_timestamps(self, df) -> np.ndarray:
         decoder_time_idx = self.predictions.x["decoder_time_idx"].detach().cpu().numpy()

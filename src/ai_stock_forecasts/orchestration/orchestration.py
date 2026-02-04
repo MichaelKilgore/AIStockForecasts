@@ -2,11 +2,12 @@
 import argparse
 from alpaca.data import TimeFrame, TimeFrameUnit
 from datetime import datetime, timezone
-from pytorch_forecasting import TimeSeriesDataSet
+from pytorch_forecasting import QuantileLoss, TimeSeriesDataSet
 import torch
 from torch.utils.data import DataLoader
 import yaml
 import os
+from ai_stock_forecasts.losses.weighted_quantile_loss import WeightedQuantileLoss
 from ai_stock_forecasts.utils.dynamodb_util import DynamoDBUtil
 from ai_stock_forecasts.data.inference_data_module import InferenceDataModule
 from ai_stock_forecasts.model.model_module import ModelModule
@@ -93,6 +94,18 @@ class Orchestration:
         self.order_util = OrderUtil()
         self.s3_util = S3ParquetUtil()
 
+        self.quantiles: list[float] = self.config['quantiles'] if 'quantiles' in self.config else [0.3, 0.5, 0.7]
+
+        if 'loss' not in self.config:
+            self.loss = QuantileLoss(quantiles=self.quantiles)
+        elif self.config['loss'] == 'WeightedQuantileLoss':
+            self.loss = WeightedQuantileLoss(quantiles=self.quantiles)
+
+        if 'gradient_clip_val' not in self.config:
+            self.gradient_clip_val = None
+        else:
+            self.gradient_clip_val = self.config['gradient_clip_val']
+
     def run_training(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
@@ -104,7 +117,7 @@ class Orchestration:
         if self.config['devices'] > 1:
             self.training_data_module.cache_df()
 
-        self.model_module = ModelModule()
+        self.model_module = ModelModule(self.loss)
 
         if self.fine_tuning_model_id:
             self._load_model(self.fine_tuning_model_id, modify_dropout=True)
@@ -118,12 +131,12 @@ class Orchestration:
                                            self.attention_head_size, self.dropout, self.hidden_continuous_size,
                                            self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
                                            self.accelerator, self.devices, self.training_data_module.train_dataloader,
-                                           self.training_data_module.validation_dataloader)
+                                           self.training_data_module.validation_dataloader, self.gradient_clip_val)
 
         if sys.platform == 'darwin':
             self.model_module.upload_checkpoints_to_s3(self.model_id)
 
-    def run_batch_inference(self):
+    def run_batch_inference(self, save_predictions=True):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
                                                        self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
@@ -134,35 +147,37 @@ class Orchestration:
         self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
         self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
 
-        self.model_module = ModelModule()
+        self.model_module = ModelModule(self.loss)
 
         self._load_model()
 
         if (not isinstance(self.training_data_module.test_dataloader, DataLoader)):
             raise Exception('something went wrong...')
         else:
-            self.model_module.run_batch_inference(self.training_data_module.test_dataloader, self.model_id, self.training_data_module.df)
+            self.model_module.run_batch_inference(self.training_data_module.test_dataloader, self.model_id, self.training_data_module.df, save_predictions)
 
     def run_evaluation(self):
-        self.model_module = ModelModule()
+        self.model_module = ModelModule(self.loss)
         try:
             self.model_module.load_human_readable_predictions(self.model_id)
         except:
             raise Exception('You must run batch inference before attempting to run evaluation')
 
-        # self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.1, dont_buy_negative_stocks=True)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.3, dont_buy_negative_stocks=True)
 
-        # self.trading_algorithm.simulate(self.model_module.predictionsDF)
+        self.trading_algorithm.simulate(self.model_module.predictionsDF)
 
-        results = []
-        for i in list([1,2]):
-            for j in list([10,25,50]):
-                for k in list([0.1, 0.2, 0.3, 0.4, 0.5]):
-                    self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=i, num_stocks_purchased=j, capital_gains_tax=0.35, uncertainty_multiplier=k, dont_buy_negative_stocks=True)
+        self.model_module.plot_mape_by_symbol()
 
-                    results.append(([i,j,k], self.trading_algorithm.simulate(self.model_module.predictionsDF)))
-                    print(results[-1])
-        print(results)
+        # results = []
+        # for i in list([1,2]):
+        #     for j in list([10,25,50]):
+        #         for k in list([0.1, 0.2, 0.3, 0.4, 0.5]):
+        #             self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=i, num_stocks_purchased=j, capital_gains_tax=0.35, uncertainty_multiplier=k, dont_buy_negative_stocks=True)
+
+        #             results.append(([i,j,k], self.trading_algorithm.simulate(self.model_module.predictionsDF)))
+        #             print(results[-1])
+        # print(results)
 
     def explain_model(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
@@ -175,7 +190,7 @@ class Orchestration:
         self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
         self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
 
-        self.model_module = ModelModule()
+        self.model_module = ModelModule(self.loss)
 
         self._load_model()
 
@@ -188,7 +203,7 @@ class Orchestration:
         self.inference_data_module = InferenceDataModule(self.symbols, self.features, self.time_frame, 
                                                          self.max_lookback_period, self.max_prediction_length)
 
-        self.model_module = ModelModule()
+        self.model_module = ModelModule(self.loss)
 
         # TODO: Sometimes when models are trained on different hardware, loading in the model this way doesn't work.
         self.model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
@@ -238,7 +253,7 @@ class Orchestration:
             self.order_util.close_all_positions()
 
         # execute trading strategy
-        self.model_module = ModelModule()
+        self.model_module = ModelModule(self.loss)
 
         with self.s3_util.load_best_model_checkpoint(self.model_id) as ckpt_path:
             ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
@@ -275,6 +290,40 @@ class Orchestration:
 
         # execute orders in alpaca
         self.order_util.place_order(order)
+
+    def find_optimal_hyperparams(self):
+        self.training_data_module = TrainingDataModule(self.symbols, self.features,
+                                                       self.time_frame,
+                                                       self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
+
+        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
+        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
+
+        if self.config['devices'] > 1:
+            self.training_data_module.cache_df()
+
+        self.model_module = ModelModule(self.loss)
+
+        self.model_module.find_optimal_hyperparameters(self.training_data_module.train_dataloader, self.training_data_module.validation_dataloader)
+
+    def find_optimal_learning_rate(self):
+        self.training_data_module = TrainingDataModule(self.symbols, self.features,
+                                                       self.time_frame,
+                                                       self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
+
+        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
+        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
+
+        if self.config['devices'] > 1:
+            self.training_data_module.cache_df()
+
+        self.model_module = ModelModule(self.loss)
+
+        self._load_model()
+
+        self.model_module.find_optimal_learning_rate(self.training_data_module.train_dataloader,
+                                                     self.training_data_module.validation_dataloader,
+                                                     self.max_epochs, self.accelerator, self.devices)
 
 
     def _init_trading_strategy(self) -> BaseTradingModule:
@@ -329,19 +378,22 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='m1-medium-high-with-less-features-and-earnings-calendar-features')
+    parser.add_argument('--model_id', type=str, default='m1-optimal-hyper-params')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=1)
-    parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_batch_inference', type=bool, default=1)
+    parser.add_argument('--run_evaluation', type=bool, default=1)
     parser.add_argument('--explain_model', type=bool, default=0)
+
     parser.add_argument('--run_inference', type=bool, default=0)
     parser.add_argument('--execute_buy', type=bool, default=0)
+    parser.add_argument('--find_optimal_hyperparams', type=bool, default=0)
+    parser.add_argument('--find_optimal_learning_rate', type=bool, default=0)
 
     return parser.parse_args()
 
 
-if __name__ == '__main__':
+def main():
     args = parse_args()
 
     with open(args.symbols_path, "r") as f:
@@ -367,6 +419,14 @@ if __name__ == '__main__':
         orc.run_inference()
     if args.execute_buy:
         orc.execute_buy(True)
+    if args.find_optimal_hyperparams:
+        orc.find_optimal_hyperparams()
+    if args.find_optimal_learning_rate:
+        orc.find_optimal_learning_rate()
+
+    return orc
 
 
+if __name__ == '__main__':
+    main()
 
