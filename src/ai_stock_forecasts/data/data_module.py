@@ -11,7 +11,7 @@ class DataModule:
         self.df: DataFrame = DataFrame()
         self.categorical_encoders = {}
         self.known_reals = ['timestamp']
-        self.unknown_reals = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap', 'surprise']
+        self.unknown_reals = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap', 'surprise', 'sandp500open']
         self.unknown_categoricals = []
         self.known_categoricals = ['year', 'month', 'day_of_month', 'day_of_week', 'hour_of_day', 'minute_of_day', 'is_earnings_day']
 

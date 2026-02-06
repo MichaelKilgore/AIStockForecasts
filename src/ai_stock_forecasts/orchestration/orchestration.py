@@ -162,7 +162,7 @@ class Orchestration:
         except:
             raise Exception('You must run batch inference before attempting to run evaluation')
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.3, dont_buy_negative_stocks=True)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=1, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.0, dont_buy_negative_stocks=True)
 
         self.trading_algorithm.simulate(self.model_module.predictionsDF)
 
@@ -377,11 +377,11 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-optimal-hyper-params-with-larger-batch-size')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-sandp500-feature')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=1)
+    parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=1)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)

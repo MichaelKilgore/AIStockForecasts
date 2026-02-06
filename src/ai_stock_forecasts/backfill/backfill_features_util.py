@@ -202,11 +202,40 @@ class BackfillFeaturesUtil:
 
         self.s3_util.upload_features_data(records, time_frame)
 
+    def backfill_sandp_500_price_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), return_df: bool = False):
+        # get SPY data
+        s_and_p_records = self.get_historical_data_util.get_historical_stock_prices(['SPY'], start, end, time_frame)
+
+        records = []
+        updated_timestamp = datetime.now()
+        for symbol in symbols:
+            for record in s_and_p_records:
+                records.append(
+                    HistoricalData(
+                        symbol=symbol,
+                        timestamp=pd.Timestamp(record.timestamp).to_pydatetime()
+                            if isinstance(record.timestamp, pd.Timestamp) else record.timestamp,
+                        feature='sandp500open',
+                        value=str(record.open),
+                        type=type(record.open).__name__,
+                        updated_timestamp=updated_timestamp,
+                        time_frame=time_frame,
+                        date=pd.Timestamp(record.timestamp).to_pydatetime()
+                            if isinstance(record.timestamp, pd.Timestamp) else record.timestamp,
+                    )
+                )
+
+        if return_df:
+            return records
+
+        self.s3_util.upload_features_data(records, time_frame)
+
+
 if __name__ == "__main__":
     obj = BackfillFeaturesUtil()
 
-    with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
-    # with open('../constants/symbols.txt', 'r') as f:
+    # with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
+    with open('../constants/symbols.txt', 'r') as f:
         symbols = [line.strip() for line in f]
 
     symbols.append('SPY')
@@ -217,7 +246,7 @@ if __name__ == "__main__":
     #     obj.backfill_base_features(['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap'], symbols[i:min(i+30, len(symbols))], datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(10, TimeFrameUnit.Minute), True)
     #     i += 30
 
-    obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
     #obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(1, TimeFrameUnit.Day), True)
@@ -225,4 +254,8 @@ if __name__ == "__main__":
     #res = obj.get_historical_data_util.get_historical_stock_prices(['AAPL'], datetime(2020, 1, 1), datetime(2025, 11, 1), TimeFrame.Minute)
     #print(len(res))
     #print(sys.getsizeof(res))
+
+    obj.backfill_sandp_500_price_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2021, 1, 1, 0, 0))
+
+
  

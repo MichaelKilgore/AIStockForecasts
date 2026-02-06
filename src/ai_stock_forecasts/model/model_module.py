@@ -70,7 +70,7 @@ class ModelModule:
         self.early_stop = EarlyStopping(
             monitor="val_loss",
             min_delta=0.0,
-            patience=15,
+            patience=5,
             mode="min",
         )
 
