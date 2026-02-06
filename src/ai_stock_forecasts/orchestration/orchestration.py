@@ -133,8 +133,7 @@ class Orchestration:
                                            self.accelerator, self.devices, self.training_data_module.train_dataloader,
                                            self.training_data_module.validation_dataloader, self.gradient_clip_val)
 
-        if sys.platform == 'darwin':
-            self.model_module.upload_checkpoints_to_s3(self.model_id)
+        self.model_module.upload_checkpoints_to_s3(self.model_id)
 
     def run_batch_inference(self, save_predictions=True):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
@@ -376,13 +375,13 @@ class Orchestration:
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--symbols_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
-    parser.add_argument('--config_path', type=str, default='/Users/michael/Coding/AIForecasts/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='m1-optimal-hyper-params')
+    parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
+    parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
+    parser.add_argument('--model_id', type=str, default='ubuntu-optimal-hyper-params-with-larger-batch-size')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=1)
-    parser.add_argument('--run_batch_inference', type=bool, default=1)
-    parser.add_argument('--run_evaluation', type=bool, default=1)
+    parser.add_argument('--run_batch_inference', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)

@@ -20,6 +20,9 @@ from pandas import DataFrame
 
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
+if torch.cuda.is_available():
+    torch.set_float32_matmul_precision('high')
+
 """
     Provides helpful logging.
 """
@@ -135,7 +138,7 @@ class ModelModule:
 
     def load_model_from_checkpoint(self, model_id: str, map_location: str):
         with self.s3_util.load_best_model_checkpoint(model_id) as ckpt_path:
-            self.model = TemporalFusionTransformer.load_from_checkpoint(ckpt_path, map_location=map_location, weights_only=False)
+            self.model = TemporalFusionTransformer.load_from_checkpoint(ckpt_path, map_location=torch.device(map_location), weights_only=False)
 
     """ There is a bug with torch metrics where even if you specify map_location to something other than cuda
         loading in the model can still fail: https://github.com/pytorch/pytorch/issues/113973
