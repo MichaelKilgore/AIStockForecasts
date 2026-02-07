@@ -7,18 +7,24 @@ from pytorch_forecasting import NaNLabelEncoder
 
 class DataModule:
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
-                 max_lookback_period: int, max_prediction_length: int):
+                 max_lookback_period: int, max_prediction_length: int, target: str = 'open', target_normalizer: str = 'auto'):
         self.df: DataFrame = DataFrame()
         self.categorical_encoders = {}
         self.known_reals = ['timestamp']
-        self.unknown_reals = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap', 'surprise', 'sandp500open']
+        self.unknown_reals = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap', 'surprise', 'sandp500open', 'open_log_return']
         self.unknown_categoricals = []
         self.known_categoricals = ['year', 'month', 'day_of_month', 'day_of_week', 'hour_of_day', 'minute_of_day', 'is_earnings_day']
 
         self.alpaca_sourced_features = ['close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap']
-        
+
         self.symbols = symbols
         self.features = features
+        self.target = target
+        if target_normalizer == 'None':
+            self.target_normalizer = None
+        else:
+            self.target_normalizer = target_normalizer
+
         if isinstance(time_frame, str):
             time_frame = TimeFrame(1, TimeFrameUnit(time_frame))
         self.time_frame = time_frame

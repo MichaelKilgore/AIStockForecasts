@@ -16,7 +16,8 @@ import pandas as pd
 """
 class TrainingDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
-                 max_lookback_period: int, max_prediction_length: int, is_df_cached: bool):
+                 max_lookback_period: int, max_prediction_length: int, is_df_cached: bool, target: str = 'open',
+                 target_normalizer: str = 'auto'):
         self.s3_util = S3ParquetUtil()
 
         """
@@ -30,7 +31,7 @@ class TrainingDataModule(DataModule):
         self.cache_dir = os.environ.get("SM_INPUT_DIR", "/tmp")
         self.cache_path = os.path.join(self.cache_dir, f"pivoted_{time_frame.amount_value}_{time_frame.unit_value}.parquet")
 
-        super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length)
+        super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length, target, target_normalizer)
 
         self.training_dataset = None
         self.validation_dataset = None
@@ -79,15 +80,17 @@ class TrainingDataModule(DataModule):
         wide = df.pivot(index=['symbol', 'timestamp'], columns='feature', values='value').reset_index()
 
         # we only want rows where 
-        wide = wide[wide['open'].notna()]
+        wide = wide[wide[self.target].notna()]
 
         return wide
 
     def construct_training_and_validation_datasets(self, train_start: datetime, train_end: datetime,
-                                                    validation_end: datetime):
+                                                   validation_end: datetime):
         train_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= train_end)
         train_df = self.df.loc[train_mask].copy()
 
+        print(f'setting target to: {self.target}')
+        print(f'setting target_normalizer to: {self.target_normalizer}')
         self.training_dataset = TimeSeriesDataSet(
             train_df,
             time_idx="time_idx",
@@ -97,9 +100,10 @@ class TrainingDataModule(DataModule):
             time_varying_known_categoricals=self._get_known_categoricals(),
             max_encoder_length=self.max_lookback_period,
             max_prediction_length=self.max_prediction_length,
-            target="open",
+            target=self.target,
             allow_missing_timesteps=True,
             categorical_encoders=self.categorical_encoders,
+            target_normalizer=self.target_normalizer,
         )
 
         training_max_idx = train_df["time_idx"].max()

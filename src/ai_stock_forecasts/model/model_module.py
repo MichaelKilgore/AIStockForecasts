@@ -242,6 +242,10 @@ class ModelModule:
             "y_pred_p70": list(p70),
         })
 
+    def append_actuals_to_simple_predictions(self, df: DataFrame):
+        # time_idx, timestamp, symbol, feature_a, feature_b, ...
+        self.predictionsDF = self.predictionsDF.merge(df, on=['symbol', 'timestamp'], how='inner')
+
     def plot_mape_by_symbol(self):
         self.mapeResultDF = self.predictionsDF.copy()
         self.mapeResultDF['mape'] = ((self.mapeResultDF['y'] - self.mapeResultDF['y_pred_p50']).abs() / self.mapeResultDF['y']) * 100

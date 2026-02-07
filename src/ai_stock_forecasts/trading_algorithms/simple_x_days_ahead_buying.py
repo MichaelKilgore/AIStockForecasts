@@ -34,8 +34,16 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             "y_pred_p30": [ [ ], [ ]... ],
             "y_pred_p50": [ [ ], [ ]... ],
             "y_pred_p70": [ [ ], [ ]... ],
+            "open": [ price, price, ... ],
+
+        predicting_raw_num means that we are predicting something like 'open' which means
+        in order for us to understand the models forecast we have to check y against current_y
+
+        where-as for example a target of open_log_return. open_log_return is just log(open - open of prev day)
+        so we don't need to do any check we can just sort by the p50.
+
     """
-    def simulate(self, predictions: DataFrame) -> tuple:
+    def simulate(self, predictions: DataFrame, predicting_raw_num: bool) -> tuple:
         period_returns = []
         total_money = []
         money_made_per_day = DefaultDict(int)
@@ -52,15 +60,37 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             mask = predictions["timestamp"] == current_ts
             filtered = predictions.loc[mask].copy()
 
-            top_x = self._determine_top_x(filtered)
+            top_x = self._determine_top_x(filtered, predicting_raw_num)
 
             total_profit = 0
-            if len(top_x) > 0:
+            if len(top_x) > 0 and predicting_raw_num:
                 for row, curr_price in zip(top_x["y"], top_x["current_y"]):
                     money_to_invest = money if self.compound_money else self.starting_money
                     money_invested_in_this_stock = (money_to_invest / len(top_x))
                     num_stocks_bought = ( money_invested_in_this_stock / curr_price )
                     stock_value_now = row[self.interval_days-1]
+                    money_post_sell = (num_stocks_bought * stock_value_now)
+                    total_profit += money_post_sell - (money_to_invest / len(top_x))
+            elif len(top_x) > 0:
+                i = timestamps[timestamps == current_ts].index[0]
+                if i + self.interval_days >= len(timestamps):
+                    break
+                future_ts = timestamps[i + self.interval_days]
+                future_mask = predictions["timestamp"] == future_ts
+
+                future_price = predictions.loc[future_mask].copy()
+                future_price['future_price'] = future_price['open']
+
+                top_x['curr_price'] = top_x['open']
+                top_x = top_x[['symbol', 'curr_price']].merge(
+                        future_price[['symbol', 'future_price']],
+                        on=['symbol'], how='inner')
+
+                for _, curr_price, future_price in zip(top_x['symbol'], top_x['curr_price'], top_x['future_price']):
+                    money_to_invest = money if self.compound_money else self.starting_money
+                    money_invested_in_this_stock = (money_to_invest / len(top_x))
+                    num_stocks_bought = ( money_invested_in_this_stock / curr_price )
+                    stock_value_now = future_price
                     money_post_sell = (num_stocks_bought * stock_value_now)
                     total_profit += money_post_sell - (money_to_invest / len(top_x))
 
@@ -104,34 +134,55 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
 
         return top_x
 
-    def _determine_top_x(self, predictions: DataFrame) -> DataFrame:
+
+    def _determine_top_x(self, predictions: DataFrame, predicting_raw_num: bool) -> DataFrame:
         p30 = np.stack(predictions["y_pred_p30"].to_numpy())
         p50 = np.stack(predictions["y_pred_p50"].to_numpy())
         p70 = np.stack(predictions["y_pred_p70"].to_numpy())
 
-        current_y = predictions['current_y']
+        if predicting_raw_num:
+            current_y = predictions['current_y']
 
-        eps = 1e-8
-        start = current_y
-        end = p50[:, self.interval_days-1]
+            eps = 1e-8
+            start = current_y
+            end = p50[:, self.interval_days-1]
 
-        x = (end - start) / (start + eps) * 100.0
-        band_width_pct = (p70 - p30) / (p30 + eps) * 100.0
-        y = band_width_pct.mean(axis=1)
+            x = (end - start) / (start + eps) * 100.0
+            band_width_pct = ( (p70 - p30) / (p30 + eps) ) * 100.0
+            y = band_width_pct.mean(axis=1)
 
-        """the general idea of this scoring mechanism is that
-           we factor in a combination of which stocks are predicted
-           to rise the most, but also factor in uncertainty, greater
-           distances between p30 and p70 suggest the stock is volatile."""
-        score = x - (y * self.uncertainty_multiplier)
+            """the general idea of this scoring mechanism is that
+               we factor in a combination of which stocks are predicted
+               to rise the most, but also factor in uncertainty, greater
+               distances between p30 and p70 suggest the stock is volatile."""
+            score = x - (y * self.uncertainty_multiplier)
 
-        predictions.loc[:, "x"] = x
-        predictions.loc[:, "z"] = y
-        predictions.loc[:, "score"] = score
+            predictions.loc[:, "x"] = x
+            predictions.loc[:, "z"] = y
+            predictions.loc[:, "score"] = score
 
-        top_x = predictions.sort_values("score", ascending=False).head(self.num_stocks_purchased)
-        if (self.dont_buy_negative_stocks):
-            top_x = top_x[top_x["score"] > 0.0]
+            top_x = predictions.sort_values("score", ascending=False).head(self.num_stocks_purchased)
+            if (self.dont_buy_negative_stocks):
+                top_x = top_x[top_x["score"] > 0.0]
 
-        return top_x
+            return top_x
+        else:
+            eps = 1e-8
+            x = p50[:, self.interval_days-1]
+            band_width_pct = np.abs(p70 - p30)
+            y = band_width_pct.mean(axis=1)
+
+            score = x - (y * self.uncertainty_multiplier)
+
+            predictions.loc[:, "x"] = x
+            predictions.loc[:, "z"] = y
+            predictions.loc[:, "score"] = score
+
+            top_x = predictions.sort_values("score", ascending=False).head(self.num_stocks_purchased)
+            if (self.dont_buy_negative_stocks):
+                top_x = top_x[top_x["score"] > 0.0]
+
+            return top_x
+
+
 

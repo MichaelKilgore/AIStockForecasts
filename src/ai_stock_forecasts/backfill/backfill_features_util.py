@@ -7,6 +7,7 @@ from ai_stock_forecasts.models.historical_data import HistoricalData
 from ai_stock_forecasts.models.stock_bar import StockBar
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 import pandas as pd
+import numpy as np
 
 import time
 
@@ -230,12 +231,84 @@ class BackfillFeaturesUtil:
 
         self.s3_util.upload_features_data(records, time_frame)
 
+    def backfill_log_return_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
+        features_data = self.s3_util.get_features_data(symbols, ['open'], time_frame)
+
+        features_data['feature'] = 'open_log_return'
+
+        features_data['value'] = np.log(
+            features_data['value'].astype(float) /
+                features_data.groupby(['symbol', 'time_frame'])['value'].shift(1).astype(float)
+        ).astype(str)
+        updated_timestamp = datetime.now()
+        features_data['updated_timestamp'] = updated_timestamp
+        features_data = features_data[features_data['value'] != 'nan']
+
+        records = [
+            HistoricalData(
+                symbol=row["symbol"],
+                timestamp=pd.to_datetime(row["timestamp"]),
+                feature=row["feature"],
+                value=str(row["value"]),
+                type=row["type"],
+                updated_timestamp=pd.to_datetime(row["updated_timestamp"]),
+                time_frame=time_frame,
+                date=pd.to_datetime(row["date"]),
+            )
+            for row in features_data.to_dict(orient="records")
+        ]
+
+        self.s3_util.upload_features_data(records, time_frame)
+
+
+    """
+        upper_wick = high − max(open, close)
+        lower_wick = min(open, close) − low
+        body       = close − open
+        range      = high − low
+
+        TODO: FINISH THIS FUNCTION
+    """
+    def backfill_wicks_body_range(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
+        features_data = self.s3_util.get_features_data(symbols, ['open', 'close', 'high', 'low'], time_frame)
+
+        features_data['feature'] = 'open_log_return'
+
+        features_data['value'] = np.log(
+            features_data['value'].astype(float) /
+                features_data.groupby(['symbol', 'time_frame'])['value'].shift(1).astype(float)
+        ).astype(str)
+        updated_timestamp = datetime.now()
+        features_data['updated_timestamp'] = updated_timestamp
+        features_data = features_data[features_data['value'] != 'nan']
+
+        records = [
+            HistoricalData(
+                symbol=row["symbol"],
+                timestamp=pd.to_datetime(row["timestamp"]),
+                feature=row["feature"],
+                value=str(row["value"]),
+                type=row["type"],
+                updated_timestamp=pd.to_datetime(row["updated_timestamp"]),
+                time_frame=time_frame,
+                date=pd.to_datetime(row["date"]),
+            )
+            for row in features_data.to_dict(orient="records")
+        ]
+
+        self.s3_util.upload_features_data(records, time_frame)
+
+
+        pass
+
+
+
 
 if __name__ == "__main__":
     obj = BackfillFeaturesUtil()
 
-    # with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
-    with open('../constants/symbols.txt', 'r') as f:
+    with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
+    # with open('../constants/symbols.txt', 'r') as f:
         symbols = [line.strip() for line in f]
 
     symbols.append('SPY')
@@ -255,7 +328,7 @@ if __name__ == "__main__":
     #print(len(res))
     #print(sys.getsizeof(res))
 
-    obj.backfill_sandp_500_price_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2021, 1, 1, 0, 0))
+    obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
  
