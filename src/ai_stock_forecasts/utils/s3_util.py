@@ -128,6 +128,8 @@ class S3ParquetUtil:
 
             print(f"Uploaded {len(recs)} rows to s3://{self.bucket}/{key}")
 
+    # TODO: move df upload logic in upload_features_data to separate function so that it can be exuecuted directly.
+
     def _to_row(self, rec: HistoricalData) -> dict:
         return {
             "symbol": rec.symbol,

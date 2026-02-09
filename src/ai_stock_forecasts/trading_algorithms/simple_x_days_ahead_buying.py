@@ -81,7 +81,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
                 future_price = predictions.loc[future_mask].copy()
                 future_price['future_price'] = future_price['open']
 
-                top_x['curr_price'] = top_x['open']
+                top_x['curr_price'] = top_x['close']
                 top_x = top_x[['symbol', 'curr_price']].merge(
                         future_price[['symbol', 'future_price']],
                         on=['symbol'], how='inner')

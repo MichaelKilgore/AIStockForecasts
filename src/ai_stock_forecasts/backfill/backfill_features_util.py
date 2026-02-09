@@ -231,10 +231,10 @@ class BackfillFeaturesUtil:
 
         self.s3_util.upload_features_data(records, time_frame)
 
-    def backfill_log_return_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
-        features_data = self.s3_util.get_features_data(symbols, ['open'], time_frame)
+    def backfill_log_return_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), feature: str='open'):
+        features_data = self.s3_util.get_features_data(symbols, [feature], time_frame)
 
-        features_data['feature'] = 'open_log_return'
+        features_data['feature'] = f'{feature}_log_return'
 
         features_data['value'] = np.log(
             features_data['value'].astype(float) /
@@ -272,36 +272,67 @@ class BackfillFeaturesUtil:
     def backfill_wicks_body_range(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
         features_data = self.s3_util.get_features_data(symbols, ['open', 'close', 'high', 'low'], time_frame)
 
-        features_data['feature'] = 'open_log_return'
+        df = features_data.drop_duplicates(subset=['symbol', 'timestamp', 'feature'], keep='first')
+        wide = df.pivot(index=['symbol', 'timestamp'], columns='feature', values='value').reset_index()
 
-        features_data['value'] = np.log(
-            features_data['value'].astype(float) /
-                features_data.groupby(['symbol', 'time_frame'])['value'].shift(1).astype(float)
-        ).astype(str)
+        wide['open'] = wide['open'].astype(float)
+        wide['high'] = wide['high'].astype(float)
+        wide['close'] = wide['close'].astype(float)
+        wide['low'] = wide['low'].astype(float)
+
+        records = [ ]
+
         updated_timestamp = datetime.now()
-        features_data['updated_timestamp'] = updated_timestamp
-        features_data = features_data[features_data['value'] != 'nan']
-
-        records = [
-            HistoricalData(
+        for row in wide.to_dict(orient="records"):
+            records.append(HistoricalData(
                 symbol=row["symbol"],
                 timestamp=pd.to_datetime(row["timestamp"]),
-                feature=row["feature"],
-                value=str(row["value"]),
-                type=row["type"],
-                updated_timestamp=pd.to_datetime(row["updated_timestamp"]),
+                feature='upper_wick',
+                value=str(row["high"] - max(row['open'], row['close']) ),
+                type='float',
+                updated_timestamp=pd.to_datetime(updated_timestamp),
                 time_frame=time_frame,
-                date=pd.to_datetime(row["date"]),
-            )
-            for row in features_data.to_dict(orient="records")
-        ]
+                date=pd.Timestamp(row['timestamp']).to_pydatetime()
+                            if isinstance(row['timestamp'], pd.Timestamp) else row['timestamp'],
+            ))
+
+            records.append(HistoricalData(
+                symbol=row["symbol"],
+                timestamp=pd.to_datetime(row["timestamp"]),
+                feature='lower_wick',
+                value=str( min(row['open'], row['close']) - row['low'] ),
+                type='float',
+                updated_timestamp=pd.to_datetime(updated_timestamp),
+                time_frame=time_frame,
+                date=pd.Timestamp(row['timestamp']).to_pydatetime()
+                            if isinstance(row['timestamp'], pd.Timestamp) else row['timestamp'],
+            ))
+
+            records.append(HistoricalData(
+                symbol=row["symbol"],
+                timestamp=pd.to_datetime(row["timestamp"]),
+                feature='body',
+                value=str( row['close'] - row['open'] ),
+                type='float',
+                updated_timestamp=pd.to_datetime(updated_timestamp),
+                time_frame=time_frame,
+                date=pd.Timestamp(row['timestamp']).to_pydatetime()
+                            if isinstance(row['timestamp'], pd.Timestamp) else row['timestamp'],
+            ))
+
+            records.append(HistoricalData(
+                symbol=row["symbol"],
+                timestamp=pd.to_datetime(row["timestamp"]),
+                feature='range',
+                value=str( row['high'] - row['low'] ),
+                type='float',
+                updated_timestamp=pd.to_datetime(updated_timestamp),
+                time_frame=time_frame,
+                date=pd.Timestamp(row['timestamp']).to_pydatetime()
+                            if isinstance(row['timestamp'], pd.Timestamp) else row['timestamp'],
+            ))
 
         self.s3_util.upload_features_data(records, time_frame)
-
-
-        pass
-
-
 
 
 if __name__ == "__main__":
@@ -328,7 +359,8 @@ if __name__ == "__main__":
     #print(len(res))
     #print(sys.getsizeof(res))
 
-    obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # obj.backfill_wicks_body_range(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0), feature='close')
 
 
  
