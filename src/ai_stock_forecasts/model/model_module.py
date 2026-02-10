@@ -337,6 +337,19 @@ class ModelModule:
         fig = res.plot(show=True, suggest=True)
         fig.show()
 
+    def plot_prediction(self, dataloader: DataLoader):
+        trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
+        raw = self.model.predict(dataloader, mode='raw', return_x=True, return_y=True, trainer_kwargs=trainer_kwargs)
+
+        out = raw.output
+        x = raw.x
+        idx = 0
+
+        fig = self.model.plot_prediction(x, out, 0)
+
+        fig.savefig("prediction.png", dpi=200, bbox_inches="tight")
+        # fig.show()
+
     def _get_timestamps(self, df) -> np.ndarray:
         decoder_time_idx = self.predictions.x["decoder_time_idx"].detach().cpu().numpy()
 

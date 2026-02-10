@@ -347,6 +347,27 @@ class Orchestration:
                                                      self.training_data_module.validation_dataloader,
                                                      self.max_epochs, self.accelerator, self.devices)
 
+    def plot_predictions(self):
+        self.training_data_module = TrainingDataModule(self.symbols, self.features,
+                                                       self.time_frame,
+                                                       self.max_lookback_period,
+                                                       self.max_prediction_length,
+                                                       self.target,
+                                                       self.target_normalizer)
+
+        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
+        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
+
+        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
+        self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+
+        self.model_module = ModelModule(self.loss)
+
+        self._load_model()
+
+        self.model_module.plot_prediction(self.training_data_module.test_dataloader)
+
+
 
     def _init_trading_strategy(self) -> BaseTradingModule:
         strat = self.config['preferred_trading_strategy']
@@ -404,13 +425,14 @@ def parse_args():
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=1)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)
     parser.add_argument('--execute_buy', type=bool, default=0)
     parser.add_argument('--find_optimal_hyperparams', type=bool, default=0)
     parser.add_argument('--find_optimal_learning_rate', type=bool, default=0)
+    parser.add_argument('--plot_prediction', type=bool, default=1)
 
     return parser.parse_args()
 
@@ -443,6 +465,8 @@ def main():
         orc.find_optimal_hyperparams()
     if args.find_optimal_learning_rate:
         orc.find_optimal_learning_rate()
+    if args.plot_prediction:
+        orc.plot_predictions()
 
 
 if __name__ == '__main__':
