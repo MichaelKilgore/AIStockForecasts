@@ -16,6 +16,7 @@ from pytorch_forecasting.models.base import Prediction
 import cloudpickle
 
 from ai_stock_forecasts.models.historical_data import HistoricalData
+from lightning_utilities.core.rank_zero import rank_zero_only
 
 class S3ParquetUtil:
     def __init__(self):
@@ -142,6 +143,7 @@ class S3ParquetUtil:
             "date": rec.date.date(),
         }
 
+    @rank_zero_only
     def save_raw_predictions(self, model_id: str, predictions: Prediction):
         key = 'model_predictions/'+model_id+'.pkl'
         print(f'saving raw predictions for model_id: {model_id} to {key}')
@@ -151,6 +153,7 @@ class S3ParquetUtil:
 
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=buf.getvalue())
 
+    @rank_zero_only
     def save_human_readable_predictions(self, model_id: str, predictions: pd.DataFrame):
         key = 'model_predictions_readable/'+model_id+'.pkl'
         print(f'saving human readable predictions for model_id: {model_id} to {key}')

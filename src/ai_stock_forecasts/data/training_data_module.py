@@ -3,11 +3,13 @@ from datetime import datetime
 import os
 from typing import Union
 from alpaca.data import TimeFrame, TimeFrameUnit
+from lightning_utilities.core.rank_zero import rank_zero_only
 from pandas import DataFrame, factorize, to_numeric
 from pytorch_forecasting import TimeSeriesDataSet
 from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 import pandas as pd
+import time
 
 
 """
@@ -16,7 +18,7 @@ import pandas as pd
 """
 class TrainingDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
-                 max_lookback_period: int, max_prediction_length: int, is_df_cached: bool, target: str = 'open',
+                 max_lookback_period: int, max_prediction_length: int, target: str = 'open',
                  target_normalizer: str = 'auto'):
         self.s3_util = S3ParquetUtil()
 
@@ -27,7 +29,6 @@ class TrainingDataModule(DataModule):
             constructing our df one time is important because it saves on execution time and more importantly
             it reduces the maximum amount of memory required to construct our data by number of devices multiples.
         """
-        self.is_df_cached = is_df_cached
         self.cache_dir = os.environ.get("SM_INPUT_DIR", "/tmp")
         self.cache_path = os.path.join(self.cache_dir, f"pivoted_{time_frame.amount_value}_{time_frame.unit_value}.parquet")
 
@@ -41,10 +42,25 @@ class TrainingDataModule(DataModule):
         self.validation_dataloader = None
         self.test_dataloader = None
 
-    def _construct_df(self):
-        if self.is_df_cached:
-            self.df.read_parquet(self.cache_path)
 
+    def _construct_df(self):
+        self.create_cached_df()
+
+        if not self.df.empty:
+            return
+
+        while True:
+            if not self.df.empty:
+                return
+            try:
+                print(f'attempting to pull cached df from {self.cache_path}')
+                self.df = pd.read_parquet(self.cache_path)
+            except:
+                time.sleep(10)
+
+
+    @rank_zero_only
+    def create_cached_df(self):
         features_data = self.s3_util.get_features_data(self.symbols, self.features, self.time_frame)
 
         pivoted_features_data = self._pivot_features_data(features_data)
@@ -57,6 +73,7 @@ class TrainingDataModule(DataModule):
                 pivoted_features_data[col] = pivoted_features_data[col].astype(int).astype(str).astype('category')
 
         self.df = pivoted_features_data
+
 
     def _pivot_features_data(self, df: DataFrame):
 
@@ -141,9 +158,9 @@ class TrainingDataModule(DataModule):
             raise Exception("You have to construct the training_dataset before executing this function")
 
         self.train_dataloader = self.training_dataset.to_dataloader(train=True, batch_size=batch_size,
-                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)) 
+                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
         self.validation_dataloader = self.validation_dataset.to_dataloader(train=False, batch_size=batch_size,
-                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)) 
+                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
 
     def construct_test_dataloader(self, batch_size: int, num_workers: int, pin_memory: bool):
         if self.test_dataset == None:
@@ -152,7 +169,9 @@ class TrainingDataModule(DataModule):
         self.test_dataloader = self.test_dataset.to_dataloader(train=False, batch_size=batch_size,
                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)) 
 
+    @rank_zero_only
     def cache_df(self):
+        print(f'caching dataset at: {self.cache_path}')
         self.df.to_parquet(self.cache_path, index=False)
 
 

@@ -23,15 +23,6 @@ from alpaca.trading.enums import OrderSide
 from ai_stock_forecasts.ordering.order_util import OrderUtil
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
-def local_rank() -> int:
-    v = os.environ.get("LOCAL_RANK")
-    return int(v) if v is not None else -1
-
-def global_rank() -> int:
-    v = os.environ.get("RANK")
-    return int(v) if v is not None else -1
-
-
 class Orchestration:
     def __init__(self, symbols: list[str], model_id: str, config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -71,8 +62,6 @@ class Orchestration:
 
         self.max_lookback_period: int = self.config['max_lookback_period']
         self.max_prediction_length: int = self.config['max_prediction_length']
-
-        self.is_df_cached = not local_rank() == 0 and global_rank() == 0 and self.devices > 1
 
         self.use_gpu = self.accelerator in ('gpu', 'cuda', 'mps')
 
@@ -121,7 +110,6 @@ class Orchestration:
                                                        self.time_frame,
                                                        self.max_lookback_period,
                                                        self.max_prediction_length,
-                                                       self.is_df_cached,
                                                        self.target,
                                                        self.target_normalizer)
 
@@ -154,7 +142,6 @@ class Orchestration:
                                                        self.time_frame,
                                                        self.max_lookback_period,
                                                        self.max_prediction_length,
-                                                       self.is_df_cached,
                                                        self.target,
                                                        self.target_normalizer)
 
@@ -171,7 +158,7 @@ class Orchestration:
         if (not isinstance(self.training_data_module.test_dataloader, DataLoader)):
             raise Exception('something went wrong...')
         else:
-            self.model_module.run_batch_inference(self.training_data_module.test_dataloader, self.model_id, self.training_data_module.df, save_predictions)
+                self.model_module.run_batch_inference(self.training_data_module.test_dataloader, self.model_id, self.training_data_module.df, save_predictions)
 
     def run_evaluation(self):
         self.model_module = ModelModule(self.loss)
@@ -188,18 +175,17 @@ class Orchestration:
             For example, predicting open_log_return is a calculated field and we want to calculate how much money we would actually make. To do that we can either reverse engineer the feature or better yet, just pull open and use that instead. Which is what we are doing.
             """ 
         if self.target not in ['close', 'high', 'low', 'open']:
-            dummy_data_module = TrainingDataModule(self.symbols, ['open', 'close'],
+            dummy_data_module = TrainingDataModule(self.symbols, ['close'],
                                                        self.time_frame,
                                                        self.max_lookback_period,
                                                        self.max_prediction_length,
-                                                       self.is_df_cached,
-                                                       'open',
+                                                       'close',
                                                        self.target_normalizer)
 
             self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.0, dont_buy_negative_stocks=True)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=1, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True)
 
         self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'])
 
@@ -218,7 +204,7 @@ class Orchestration:
     def explain_model(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
-                                                       self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
+                                                       self.max_lookback_period, self.max_prediction_length)
 
         self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
         self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
@@ -330,7 +316,7 @@ class Orchestration:
     def find_optimal_hyperparams(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
-                                                       self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
+                                                       self.max_lookback_period, self.max_prediction_length)
 
         self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
         self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
@@ -345,7 +331,7 @@ class Orchestration:
     def find_optimal_learning_rate(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
-                                                       self.max_lookback_period, self.max_prediction_length, self.is_df_cached)
+                                                       self.max_lookback_period, self.max_prediction_length)
 
         self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
         self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
@@ -414,11 +400,11 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-close-log-return')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-close-log-return-and-longer-lookback')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=1)
+    parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=1)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)
@@ -438,8 +424,6 @@ def main():
     # when running locally
     if os.environ.get("SM_MODEL_DIR") is None:
         os.environ['SM_MODEL_DIR'] = './'
-        os.environ['LOCAL_RANK'] = '0'
-        os.environ['RANK'] = '0'
 
     orc = Orchestration(symbols, args.model_id, args.config_path)
 
@@ -460,9 +444,6 @@ def main():
     if args.find_optimal_learning_rate:
         orc.find_optimal_learning_rate()
 
-    return orc
-
 
 if __name__ == '__main__':
     main()
-

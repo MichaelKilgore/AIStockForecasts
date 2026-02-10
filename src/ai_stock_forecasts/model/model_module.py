@@ -19,6 +19,9 @@ import pandas as pd
 from pandas import DataFrame
 
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
+from lightning_utilities.core.rank_zero import rank_zero_only
+
+
 
 if torch.cuda.is_available():
     torch.set_float32_matmul_precision('high')
@@ -133,6 +136,7 @@ class ModelModule:
 
         self.trainer.fit(self.model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
 
+    @rank_zero_only
     def save_checkpoint(self):
         self.trainer.save_checkpoint(os.path.join(self.model_dir, 'tft_model.ckpt'))
 
@@ -173,13 +177,16 @@ class ModelModule:
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
+        trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
         self.predictions = self.model.predict(
             dataloader,
             mode=self.mode,
             return_x=True,
             return_y=True,
             return_index=True,
+            trainer_kwargs=trainer_kwargs
         )
+
         if save_predictions:
             self.s3_util.save_raw_predictions(model_id, self.predictions)
         self.convert_raw_predictions_to_simpler_format(df)
@@ -190,12 +197,14 @@ class ModelModule:
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
+        trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
         self.predictions = self.model.predict(
             dataloader,
             mode=self.mode,
             return_x=True,
             return_y=True,
             return_index=True,
+            trainer_kwargs=trainer_kwargs,
         )
         self.convert_raw_predictions_to_simpler_format(df)
 
