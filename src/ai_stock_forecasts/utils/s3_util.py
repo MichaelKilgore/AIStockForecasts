@@ -185,7 +185,7 @@ class S3ParquetUtil:
         return pickle.loads(data)
 
     @contextmanager
-    def load_best_model_checkpoint(self, model_id: str):
+    def load_best_model_checkpoint(self, model_id: str, pull_last_ckpt: bool=False):
         key = model_id + '/output/model.tar.gz'
         print(f'loading model ckpt for model_id: {model_id} from {key}')
 
@@ -211,9 +211,9 @@ class S3ParquetUtil:
                 def score(m):
                     name = Path(m.name).name.lower()
                     if "best" in name:
-                        return 0
+                        return 0 if not pull_last_ckpt else 1
                     if "last" in name:
-                        return 1
+                        return 1 if not pull_last_ckpt else 0
                     return 2
 
                 ckpts.sort(key=score)

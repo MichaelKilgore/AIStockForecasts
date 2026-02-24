@@ -122,7 +122,7 @@ class Orchestration:
         self.model_module = ModelModule(self.loss)
 
         if self.fine_tuning_model_id:
-            self._load_model(self.fine_tuning_model_id, modify_dropout=True)
+            self._load_model(self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
 
         if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet) or
            not isinstance(self.training_data_module.train_dataloader, DataLoader) or
@@ -391,11 +391,11 @@ class Orchestration:
         else:
             raise Exception('The trading strategy specified is not supported')
 
-    def _load_model(self, model_id='', modify_dropout=False):
+    def _load_model(self, model_id='', modify_dropout=False, load_last_ckpt: bool=False):
         model_id = model_id if model_id != '' else self.model_id
         if not modify_dropout:
             try:
-                self.model_module.load_model_from_checkpoint(model_id, self.accelerator)
+                self.model_module.load_model_from_checkpoint(model_id, self.accelerator, load_last_ckpt)
             except:
                 dataset = self.training_data_module.training_dataset
  
@@ -406,7 +406,8 @@ class Orchestration:
                                                                           dataset, self.learning_rate,
                                                                           self.hidden_size, self.attention_head_size,
                                                                           self.dropout, self.hidden_continuous_size,
-                                                                          self.lstm_layers, self.reduce_on_plateau_patience)
+                                                                          self.lstm_layers, self.reduce_on_plateau_patience,
+                                                                          load_last_ckpt)
         else:
             dataset = self.training_data_module.training_dataset
  
@@ -425,11 +426,11 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-vix-log-and-more-complex')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-vix-log-and-long-training')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=0)
+    parser.add_argument('--run_training', type=bool, default=1)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=1)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)

@@ -95,7 +95,8 @@ class ModelModule:
 
         self.step_logging_callback = StepPrint(every=50)
 
-        self.callbacks = [ self.early_stop, self.checkpoint_callback, self.ckpt_best_callback, self.step_logging_callback ]
+        self.callbacks = [ self.checkpoint_callback, self.ckpt_best_callback, self.step_logging_callback ]
+        # self.callbacks = [ self.early_stop, self.checkpoint_callback, self.ckpt_best_callback, self.step_logging_callback ]
 
     def run_training(self, training_dataset: TimeSeriesDataSet, 
                      learning_rate: float, hidden_size: int,
@@ -140,8 +141,8 @@ class ModelModule:
     def save_checkpoint(self):
         self.trainer.save_checkpoint(os.path.join(self.model_dir, 'tft_model.ckpt'))
 
-    def load_model_from_checkpoint(self, model_id: str, map_location: str):
-        with self.s3_util.load_best_model_checkpoint(model_id) as ckpt_path:
+    def load_model_from_checkpoint(self, model_id: str, map_location: str, load_last_ckpt: bool=False):
+        with self.s3_util.load_best_model_checkpoint(model_id, load_last_ckpt) as ckpt_path:
             self.model = TemporalFusionTransformer.load_from_checkpoint(ckpt_path, map_location=torch.device(map_location), weights_only=False)
 
     """ There is a bug with torch metrics where even if you specify map_location to something other than cuda
@@ -154,8 +155,8 @@ class ModelModule:
                                             learning_rate: float, hidden_size: int,
                                             attention_head_size: int, dropout: float,
                                             hidden_continuous_size: int, lstm_layers: int,
-                                            reduce_on_plateau_patience: int):
-        with self.s3_util.load_best_model_checkpoint(model_id) as ckpt_path:
+                                            reduce_on_plateau_patience: int, load_last_ckpt: bool=False):
+        with self.s3_util.load_best_model_checkpoint(model_id, load_last_ckpt) as ckpt_path:
             self.model = TemporalFusionTransformer.from_dataset(
                 training_dataset,
                 learning_rate=learning_rate,
