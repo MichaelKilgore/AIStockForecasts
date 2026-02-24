@@ -9,3 +9,5 @@ matplotlib==3.10.8
 pytorch_forecasting==1.6.0
 torch==2.9.1
 tensorboard
+yfinance==1.2.0
+

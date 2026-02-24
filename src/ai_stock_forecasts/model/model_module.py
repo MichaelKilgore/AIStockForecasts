@@ -369,7 +369,8 @@ class ModelModule:
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
-        raw = self.model.predict(dataloader, mode='raw', return_x=True)
+        trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
+        raw = self.model.predict(dataloader, mode='raw', return_x=True, trainer_kwargs=trainer_kwargs)
 
         interp = self.model.interpret_output(raw.output, reduction='sum')
 

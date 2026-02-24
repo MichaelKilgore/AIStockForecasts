@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from alpaca.data import TimeFrame, TimeFrameUnit
 
@@ -135,7 +136,6 @@ class BackfillFeaturesUtil:
             sys.stdout.write("[%-20s] %d%%" % ('='*int((curr_delta / delta)*20), (curr_delta / delta)*100))
             sys.stdout.flush()
 
-            # date_times = 
             date_times = None
             if time_frame.unit_value == TimeFrameUnit.Day:
                 date_times = pd.date_range(curr, freq='D', periods=1)
@@ -183,25 +183,11 @@ class BackfillFeaturesUtil:
 
         long_df["date"] = pd.to_datetime(long_df["timestamp"])
 
-        records = []
+        long_df["value"] = long_df["value"].astype(str)
         updated_timestamp = datetime.now()
-        for r in long_df.itertuples(index=False):
-            records.append(
-                HistoricalData(
-                    symbol=r.symbol,
-                    timestamp=pd.Timestamp(r.timestamp).to_pydatetime()
-                        if isinstance(r.timestamp, pd.Timestamp) else r.timestamp,
-                    feature=r.feature,
-                    value=str(r.value),
-                    type=r.type,
-                    updated_timestamp=updated_timestamp,
-                    time_frame=time_frame,
-                    date=pd.Timestamp(r.date).to_pydatetime()
-                        if isinstance(r.date, pd.Timestamp) else r.date,
-                )
-            )
+        long_df['updated_timestamp'] = updated_timestamp
 
-        self.s3_util.upload_features_data(records, time_frame)
+        self.s3_util.upload_features_data_df(long_df, time_frame)
 
     def backfill_sandp_500_price_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), return_df: bool = False):
         # get SPY data
@@ -334,6 +320,38 @@ class BackfillFeaturesUtil:
 
         self.s3_util.upload_features_data(records, time_frame)
 
+    def backfill_vix_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), return_df: bool = False):
+        vix_records = self.get_historical_data_util.get_historical_vix()
+
+        vix_records['Date'] = vix_records['Date'].dt.tz_localize(None)
+
+        vix_records_filtered = vix_records[(vix_records['Date'] >= start) & (vix_records['Date'] <= end)]
+
+        vix_records_filtered['close_log'] = np.log(vix_records_filtered['Close']).astype(str)
+
+        # datetime64[ns]
+        records = []
+        updated_timestamp = datetime.now()
+        for symbol in symbols:
+            for record in vix_records_filtered.itertuples(index=False):
+                records.append(
+                    HistoricalData(
+                        symbol=symbol,
+                        timestamp=record.Date,
+                        feature='vix_log',
+                        value=str(record.close_log),
+                        type='float',
+                        updated_timestamp=updated_timestamp,
+                        time_frame=time_frame,
+                        date=record.Date,
+                    )
+                )
+
+        if return_df:
+            return records
+
+        self.s3_util.upload_features_data(records, time_frame)
+
 
 if __name__ == "__main__":
     obj = BackfillFeaturesUtil()
@@ -345,12 +363,15 @@ if __name__ == "__main__":
     symbols.append('SPY')
 
     # TODO: We stopped the program at 391, continue on to finish last 100 from step 14.
+    start = pd.Timestamp('2020-01-01', tzinfo=ZoneInfo("America/New_York"))
+    end = pd.Timestamp('2026-01-01', tzinfo=ZoneInfo("America/New_York"))
+
     # i = 13*30
     # while i < len(symbols):
-    #     obj.backfill_base_features(['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap'], symbols[i:min(i+30, len(symbols))], datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(10, TimeFrameUnit.Minute), True)
+    #     obj.backfill_base_features(['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap'], symbols[i:min(i+30, len(symbols))], start, end, TimeFrame(10, TimeFrameUnit.Minute), True)
     #     i += 30
 
-    # obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # obj.backfill_surprise_features(symbols[:1], datetime(2020, 1, 1, 0, 0), datetime(2025, 1, 10, 0, 0), TimeFrame(10, TimeFrameUnit.Minute))
 
 
     #obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(1, TimeFrameUnit.Day), True)
@@ -360,7 +381,9 @@ if __name__ == "__main__":
     #print(sys.getsizeof(res))
 
     # obj.backfill_wicks_body_range(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
-    obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0), feature='close')
+    # obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0), feature='close')
+
+    obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
  

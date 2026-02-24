@@ -1,4 +1,4 @@
-from typing import DefaultDict
+from typing import DefaultDict, Optional
 from pandas import DataFrame
 import numpy as np
 import pandas as pd
@@ -12,7 +12,8 @@ Simulates purchasing x stocks every y days over the entire predictions df passed
 class SimpleXDaysAheadBuying(BaseTradingModule): 
     def __init__(self, interval_days: int=1, num_stocks_purchased: int=10,
                  capital_gains_tax: float=0.35, compound_money:bool=True,
-                 dont_buy_negative_stocks:bool=True, uncertainty_multiplier:float=0.4):
+                 dont_buy_negative_stocks:bool=True, uncertainty_multiplier:float=0.4,
+                 filter_out_x_most_volatile: int=0):
         super().__init__()
         
         self.interval_days: int = interval_days
@@ -21,6 +22,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         self.compound_money: bool = compound_money
         self.dont_buy_negative_stocks: bool = dont_buy_negative_stocks
         self.uncertainty_multiplier: float = uncertainty_multiplier
+        self.filter_out_x_most_volatile=filter_out_x_most_volatile
         print(f"set trading params to: interval_days: {self.interval_days}, num_stocks_purchased: {self.num_stocks_purchased}, capital_gains_tax: {self.capital_gains_tax}, compound_money: {self.compound_money}, dont_buy_negative_stocks: {self.dont_buy_negative_stocks}, uncertainty_multiplier: {self.uncertainty_multiplier}")
 
 
@@ -43,7 +45,10 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         so we don't need to do any check we can just sort by the p50.
 
     """
-    def simulate(self, predictions: DataFrame, predicting_raw_num: bool) -> tuple:
+    def simulate(self, predictions: DataFrame, predicting_raw_num: bool, pivot_df: Optional[DataFrame]) -> tuple:
+        if self.filter_out_x_most_volatile != 0 and isinstance(pivot_df, DataFrame):
+            predictions = self._filter_out_x_most_volatile(predictions, pivot_df)
+
         period_returns = []
         total_money = []
         money_made_per_day = DefaultDict(int)
@@ -184,5 +189,17 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
 
             return top_x
 
+    def _filter_out_x_most_volatile(self, predictions: DataFrame, pivot_df: DataFrame) -> DataFrame:
+        print('filtering out x most volatile...')
+        top_x_symbols = (
+            pivot_df
+                .groupby('symbol')['close_log_return']
+                .std()
+                .sort_values(ascending=False)
+                .head(self.filter_out_x_most_volatile)
+                .index
+        )
 
+        filtered_predictions = predictions[~predictions['symbol'].isin(top_x_symbols)]
 
+        return filtered_predictions

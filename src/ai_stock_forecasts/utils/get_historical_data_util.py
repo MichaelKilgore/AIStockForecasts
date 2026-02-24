@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
-from pandas import Series
+from pandas import DataFrame, Series
+import pandas as pd
 import requests
+from datetime import timezone
 
 from dotenv import load_dotenv
 import os
@@ -12,6 +14,8 @@ from ai_stock_forecasts.models.stock_bar import StockBar
 
 from finance_calendars import finance_calendars as fc
 from alpaca.data.enums import DataFeed
+from zoneinfo import ZoneInfo
+import yfinance as yf
 
 class GetHistoricalDataUtil:
     def __init__(self):
@@ -52,10 +56,18 @@ class GetHistoricalDataUtil:
         for symbol, bars in multisymbol_quotes.data.items():
             for bar in bars:
                 res.append(StockBar(close=bar.close, high=bar.high, low=bar.low, open=bar.open,
+                                    # symbol=symbol, timestamp=bar.timestamp.astimezone(ZoneInfo("America/New_York")), trade_count=bar.trade_count,
                                     symbol=symbol, timestamp=bar.timestamp, trade_count=bar.trade_count,
                                     volume=bar.volume, vwap=bar.vwap, time_frame=time_frame))
 
         return res
+
+    def get_historical_vix(self, period: str='7y') -> DataFrame:
+        ticker = yf.Ticker('^VIX')
+        historical_data = ticker.history(period=period)
+
+        return historical_data.reset_index()[['Date', 'Close']]
+
 
     """
         returns DataFrame Series like:
@@ -78,12 +90,22 @@ if __name__ == "__main__":
 
     # curr = datetime(2025, 10, 30)
     #curr = datetime(2020, 4, 28)
-    curr = datetime(2026, 1, 14)
-    res = obj.get_surprise(curr)
-    print(res)
+    # curr = datetime(2026, 1, 14)
+    # res = obj.get_surprise(curr)
+    # print(res)
     #print(res.index[res.index.duplicated()].unique())
     #print(res['KNDI'])
-    # res = obj.get_historical_stock_prices(["SPY"], datetime(2020, 1, 1), datetime(2025, 11, 1))
+    # America/New_York
+    # start = pd.Timestamp('2025-01-01', tzinfo=ZoneInfo("America/New_York"))
+    # end = pd.Timestamp('2025-01-03', tzinfo=ZoneInfo("America/New_York"))
+    # bars = data_client.get_stock_bars(bars_request).df.tz_convert('America/New_York', level='timestamp')
+    start = datetime(2025, 1, 1)
+    end = datetime(2026, 1, 1)
+
+    # res = obj.get_historical_stock_prices(["VIX"], start, end, TimeFrame(1, TimeFrameUnit.Day))
+    res = obj.get_historical_vix()
+
+    print(res)
 
     # res.sort()
     # for val in res:

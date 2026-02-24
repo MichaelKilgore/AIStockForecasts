@@ -110,26 +110,30 @@ class S3ParquetUtil:
             rows = (self._to_row(r) for r in recs)
             df = pd.DataFrame.from_records(rows)
 
-            buffer = io.BytesIO()
-            df.to_parquet(buffer, index=False)
-            buffer.seek(0)
+            self.upload_features_data_df(df, time_frame)
 
-            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-            key = None
-            if time_frame.amount_value == 1:
-                key = f"{self.prefix}/feature={recs[0].feature}/time_frame={time_frame.unit_value.value}/historical_data_{ts}.parquet"
-            else:
-                key = f"{self.prefix}/feature={recs[0].feature}/time_frame={time_frame.amount_value}-{time_frame.unit_value.value}/historical_data_{ts}.parquet"
+    # assumes there is only one feature in this df.
+    def upload_features_data_df(self, df: pd.DataFrame, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)):
+        feature: str = df['feature'].iloc[0]
 
-            self.s3.put_object(
-                Bucket=self.bucket,
-                Key=key,
-                Body=buffer.getvalue(),
-            )
+        buffer = io.BytesIO()
+        df.to_parquet(buffer, index=False)
+        buffer.seek(0)
 
-            print(f"Uploaded {len(recs)} rows to s3://{self.bucket}/{key}")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        key = None
+        if time_frame.amount_value == 1:
+            key = f"{self.prefix}/feature={feature}/time_frame={time_frame.unit_value.value}/historical_data_{ts}.parquet"
+        else:
+            key = f"{self.prefix}/feature={feature}/time_frame={time_frame.amount_value}-{time_frame.unit_value.value}/historical_data_{ts}.parquet"
 
-    # TODO: move df upload logic in upload_features_data to separate function so that it can be exuecuted directly.
+        self.s3.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=buffer.getvalue(),
+        )
+
+        print(f"Uploaded {len(df)} rows to s3://{self.bucket}/{key}")
 
     def _to_row(self, rec: HistoricalData) -> dict:
         return {
