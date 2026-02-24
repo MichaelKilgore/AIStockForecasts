@@ -7,3 +7,4 @@
 **/*.csv
 model.tar.gz
 *.pem
+venv

@@ -186,11 +186,11 @@ class Orchestration:
             self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=1, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=50)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=7, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=50)
 
         filtered_df = dummy_data_module.df.copy()
         filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
-        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df)
+        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
 
         self.model_module.plot_mape_by_symbol()
 
@@ -425,7 +425,7 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-vix-log')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-vix-log-and-more-complex')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)

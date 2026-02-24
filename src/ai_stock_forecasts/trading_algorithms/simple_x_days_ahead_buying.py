@@ -45,7 +45,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         so we don't need to do any check we can just sort by the p50.
 
     """
-    def simulate(self, predictions: DataFrame, predicting_raw_num: bool, pivot_df: Optional[DataFrame]) -> tuple:
+    def simulate(self, predictions: DataFrame, predicting_raw_num: bool, pivot_df: Optional[DataFrame], day_of_week: str='') -> tuple:
         if self.filter_out_x_most_volatile != 0 and isinstance(pivot_df, DataFrame):
             predictions = self._filter_out_x_most_volatile(predictions, pivot_df)
 
@@ -61,11 +61,33 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         )
 
         current_ts = timestamps.min()
+        i = timestamps[timestamps == current_ts].index[0]
+        j = 1
+        while True:
+            if day_of_week != '' and timestamps[(i + j)].day_name() == day_of_week:
+                current_ts = timestamps[i + j]
+                break
+            j += 1
+
         while True:
             mask = predictions["timestamp"] == current_ts
             filtered = predictions.loc[mask].copy()
 
             top_x = self._determine_top_x(filtered, predicting_raw_num)
+
+            next_ts = None
+            if day_of_week != '':
+                i = timestamps[timestamps == current_ts].index[0]
+                j = 1
+                while True:
+                    if i + j >= len(timestamps):
+                        break
+                    elif day_of_week != '' and timestamps[(i + j)].day_name() == day_of_week:
+                        next_ts = timestamps[i + j]
+                        break
+                    j += 1
+                if i + j >= len(timestamps):
+                    break
 
             total_profit = 0
             if len(top_x) > 0 and predicting_raw_num:
@@ -103,13 +125,18 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             total_money.append(money)
             # print(f"Total Profit (investing $500 per stock): {total_profit}")
             money += total_profit
+            # Wednesday
             money_made_per_day[current_ts.day_name()] += total_profit
 
             # go to 7 days later
-            i = timestamps[timestamps == current_ts].index[0]
-            if i + self.interval_days >= len(timestamps):
-                break
-            current_ts = timestamps[i + self.interval_days]
+            if day_of_week == '':
+                i = timestamps[timestamps == current_ts].index[0]
+                if i + self.interval_days >= len(timestamps):
+                    break
+                current_ts = timestamps[i + self.interval_days]
+            else:
+                current_ts = next_ts
+
 
         # print(f"Total money made over 2024: {money - 25000}")
         absolute_difference = money - self.starting_money
