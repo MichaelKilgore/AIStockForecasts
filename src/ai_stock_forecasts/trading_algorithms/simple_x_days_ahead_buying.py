@@ -63,11 +63,12 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         current_ts = timestamps.min()
         i = timestamps[timestamps == current_ts].index[0]
         j = 1
-        while True:
-            if day_of_week != '' and timestamps[(i + j)].day_name() == day_of_week:
-                current_ts = timestamps[i + j]
-                break
-            j += 1
+        if day_of_week != '':
+            while True:
+                if day_of_week != '' and timestamps[(i + j)].day_name() == day_of_week:
+                    current_ts = timestamps[i + j]
+                    break
+                j += 1
 
         while True:
             mask = predictions["timestamp"] == current_ts

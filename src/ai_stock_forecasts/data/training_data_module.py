@@ -83,6 +83,10 @@ class TrainingDataModule(DataModule):
 
         df['value'] = to_numeric(df['value'])
 
+        df['timestamp'] = (
+            pd.to_datetime(df['timestamp'], utc=True)
+        )
+
         """for some of the feature data we don't have the same hour, min listed in the timestamp
             so we have to make sure we are grouping by correct time frame unit.
 
@@ -153,6 +157,7 @@ class TrainingDataModule(DataModule):
             stop_randomization=True,
         )
 
+    # TODO: we need to split these data loaders into like 15 evenly sized ones to handle super large predictions
     def construct_train_and_validation_dataloaders(self, batch_size: int, num_workers: int, pin_memory: bool):
         if self.training_dataset == None or self.validation_dataset == None:
             raise Exception("You have to construct the training_dataset before executing this function")
@@ -167,7 +172,7 @@ class TrainingDataModule(DataModule):
             raise Exception("You have to construct the training_dataset before executing this function")
 
         self.test_dataloader = self.test_dataset.to_dataloader(train=False, batch_size=batch_size,
-                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)) 
+                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=False)
 
     @rank_zero_only
     def cache_df(self):

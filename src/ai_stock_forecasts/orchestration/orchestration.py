@@ -42,6 +42,7 @@ class Orchestration:
         self.train_start = datetime.fromisoformat(self.config['train_start']).replace(tzinfo=timezone.utc)
         self.train_end = datetime.fromisoformat(self.config['train_end']).replace(tzinfo=timezone.utc)
         self.val_end = datetime.fromisoformat(self.config['val_end']).replace(tzinfo=timezone.utc)
+        # self.test_end = datetime.fromisoformat('2025-02-01').replace(tzinfo=timezone.utc)
         self.test_end = datetime.fromisoformat(self.config['test_end']).replace(tzinfo=timezone.utc)
 
         self.features: list[str] = self.config['features']
@@ -105,6 +106,8 @@ class Orchestration:
         else:
             self.target_normalizer = 'auto'
 
+        self.model_module = None
+
     def run_training(self):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
@@ -137,7 +140,7 @@ class Orchestration:
 
         self.model_module.upload_checkpoints_to_s3(self.model_id)
 
-    def run_batch_inference(self, save_predictions=True):
+    def run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
         self.training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
                                                        self.max_lookback_period,
@@ -153,7 +156,13 @@ class Orchestration:
 
         self.model_module = ModelModule(self.loss)
 
-        self._load_model()
+        self._load_model(load_last_ckpt=load_last_ckpt)
+
+        del self.training_data_module.training_dataset
+        del self.training_data_module.validation_dataset
+        del self.training_data_module.train_dataloader
+        del self.training_data_module.validation_dataloader
+        del self.training_data_module.test_dataset
 
         if (not isinstance(self.training_data_module.test_dataloader, DataLoader)):
             raise Exception('something went wrong...')
@@ -161,12 +170,13 @@ class Orchestration:
                 self.model_module.run_batch_inference(self.training_data_module.test_dataloader, self.model_id, self.training_data_module.df, save_predictions)
 
     def run_evaluation(self):
-        self.model_module = ModelModule(self.loss)
+        if not self.model_module or self.model_module.predictionsDF.empty:
+            self.model_module = ModelModule(self.loss)
 
-        try:
-            self.model_module.load_human_readable_predictions(self.model_id)
-        except:
-            raise Exception('You must run batch inference before attempting to run evaluation')
+            try:
+                self.model_module.load_human_readable_predictions(self.model_id)
+            except:
+                raise Exception('You must run batch inference before attempting to run evaluation')
 
 
         """ If our model is predicting something other than actual stock numbers
@@ -186,11 +196,12 @@ class Orchestration:
             self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=7, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=50)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=1, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=0)
 
         filtered_df = dummy_data_module.df.copy()
         filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
-        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
+        # Tuesday
+        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, '')
 
         self.model_module.plot_mape_by_symbol()
 
@@ -371,7 +382,10 @@ class Orchestration:
 
         self.model_module.plot_prediction(self.training_data_module.test_dataloader)
 
+    def run_checkpoint_upload(self):
+        self.model_module = ModelModule(self.loss)
 
+        self.model_module.upload_checkpoints_to_s3(self.model_id)
 
     def _init_trading_strategy(self) -> BaseTradingModule:
         strat = self.config['preferred_trading_strategy']
@@ -395,7 +409,7 @@ class Orchestration:
         model_id = model_id if model_id != '' else self.model_id
         if not modify_dropout:
             try:
-                self.model_module.load_model_from_checkpoint(model_id, self.accelerator, load_last_ckpt)
+                self.model_module.load_model_from_checkpoint(model_id, self.accelerator, load_last_ckpt=load_last_ckpt)
             except:
                 dataset = self.training_data_module.training_dataset
  
@@ -407,7 +421,7 @@ class Orchestration:
                                                                           self.hidden_size, self.attention_head_size,
                                                                           self.dropout, self.hidden_continuous_size,
                                                                           self.lstm_layers, self.reduce_on_plateau_patience,
-                                                                          load_last_ckpt)
+                                                                          load_last_ckpt=load_last_ckpt)
         else:
             dataset = self.training_data_module.training_dataset
  
@@ -418,7 +432,8 @@ class Orchestration:
                                                                       dataset, self.learning_rate,
                                                                       self.hidden_size, self.attention_head_size,
                                                                       self.dropout, self.hidden_continuous_size,
-                                                                      self.lstm_layers, self.reduce_on_plateau_patience)
+                                                                      self.lstm_layers, self.reduce_on_plateau_patience,
+                                                                      load_last_ckpt=load_last_ckpt)
 
 
 def parse_args():
@@ -426,10 +441,10 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-vix-log-and-long-training')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=1)
-    parser.add_argument('--run_batch_inference', type=bool, default=0)
+    parser.add_argument('--run_training', type=bool, default=0)
+    parser.add_argument('--run_batch_inference', type=bool, default=1)
     parser.add_argument('--run_evaluation', type=bool, default=0)
     parser.add_argument('--explain_model', type=bool, default=0)
 
@@ -439,14 +454,22 @@ def parse_args():
     parser.add_argument('--find_optimal_learning_rate', type=bool, default=0)
     parser.add_argument('--plot_prediction', type=bool, default=0)
 
+    # run_trainer uploads the checkpoints early but its helpful for when you stop training early you can run checkpoint upload early.
+    parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
 
-    with open(args.symbols_path, "r") as f:
-        symbols = [line.strip() for line in f]
+    with open('/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
+        symbols = [line.split('|')[0] for line in f]
+
+    # symbols = symbols[:2500]
+
+    # with open(args.symbols_path, "r") as f:
+    #     symbols = [line.strip() for line in f]
 
     # when running locally
     if os.environ.get("SM_MODEL_DIR") is None:
@@ -457,7 +480,7 @@ def main():
     if args.run_training:
         orc.run_training()
     if args.run_batch_inference:
-        orc.run_batch_inference()
+        orc.run_batch_inference(save_predictions=True, load_last_ckpt=False)
     if args.run_evaluation:
         orc.run_evaluation()
     if args.explain_model:
@@ -472,6 +495,10 @@ def main():
         orc.find_optimal_learning_rate()
     if args.plot_prediction:
         orc.plot_predictions()
+    if args.run_checkpoint_upload:
+        orc.run_checkpoint_upload()
+
+
 
 
 if __name__ == '__main__':

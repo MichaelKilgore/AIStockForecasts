@@ -133,6 +133,7 @@ class ModelModule:
             strategy="ddp" if devices > 1 else "auto",
             callbacks=self.callbacks,
             gradient_clip_val=gradient_clip_val,
+            logger=False,
         )
 
         self.trainer.fit(self.model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
@@ -142,7 +143,7 @@ class ModelModule:
         self.trainer.save_checkpoint(os.path.join(self.model_dir, 'tft_model.ckpt'))
 
     def load_model_from_checkpoint(self, model_id: str, map_location: str, load_last_ckpt: bool=False):
-        with self.s3_util.load_best_model_checkpoint(model_id, load_last_ckpt) as ckpt_path:
+        with self.s3_util.load_best_model_checkpoint(model_id, pull_last_ckpt=load_last_ckpt) as ckpt_path:
             self.model = TemporalFusionTransformer.load_from_checkpoint(ckpt_path, map_location=torch.device(map_location), weights_only=False)
 
     """ There is a bug with torch metrics where even if you specify map_location to something other than cuda
@@ -182,7 +183,7 @@ class ModelModule:
         self.predictions = self.model.predict(
             dataloader,
             mode=self.mode,
-            return_x=True,
+            return_x=False,
             return_y=True,
             return_index=True,
             trainer_kwargs=trainer_kwargs
@@ -202,7 +203,7 @@ class ModelModule:
         self.predictions = self.model.predict(
             dataloader,
             mode=self.mode,
-            return_x=True,
+            return_x=False,
             return_y=True,
             return_index=True,
             trainer_kwargs=trainer_kwargs,
@@ -223,7 +224,6 @@ class ModelModule:
         y_pred = self.predictions.output
 
         y_true = self.predictions.y[0]
-        groups = self.predictions.x["groups"]
         symbols = self.predictions.index['symbol']
         # y_pred shape: (239, 14, 3)
         # y shape: (239, 14)
@@ -231,8 +231,7 @@ class ModelModule:
         # timestamps: (239, 14)
 
         # pulls the y at timestamp you are predicting from
-        enc_tgt = self.predictions.x["encoder_target"]
-        current_y = enc_tgt[:, -1].detach().cpu().numpy() 
+        # enc_tgt = torch.roll(self.predictions.y[0], shifts=-1, dims=0)
 
         y_true_np = y_true.cpu().numpy()
         y_pred_np = y_pred.cpu().numpy()
@@ -245,12 +244,27 @@ class ModelModule:
         self.predictionsDF = DataFrame({
             "symbol": symbols,
             "timestamp": ts_np,
-            "current_y": current_y,
             "y": list(y_true_np),
             "y_pred_p30": list(p30),
             "y_pred_p50": list(p50),
             "y_pred_p70": list(p70),
         })
+
+        # make sure rows are ordered correctly first
+        self.predictionsDF = self.predictionsDF.sort_values(["symbol", "timestamp"])
+
+        # extract the scalar you want from the per-row array
+        self.predictionsDF["current_y"] = self.predictionsDF["y"].apply(lambda arr: arr[0])
+
+        # shift within each symbol only
+        self.predictionsDF["current_y"] = (
+            self.predictionsDF.groupby("symbol")["current_y"].shift(1)
+        )
+
+        self.predictionsDF = self.predictionsDF[
+            self.predictionsDF["current_y"].notna()
+        ]
+
 
     def append_actuals_to_simple_predictions(self, df: DataFrame):
         # time_idx, timestamp, symbol, feature_a, feature_b, ...

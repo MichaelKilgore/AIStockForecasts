@@ -356,25 +356,40 @@ class BackfillFeaturesUtil:
 if __name__ == "__main__":
     obj = BackfillFeaturesUtil()
 
-    with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
+    with open('src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
+        symbols = [line.split('|')[0] for line in f]
+
+    # with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
     # with open('../constants/symbols.txt', 'r') as f:
-        symbols = [line.strip() for line in f]
+    #     symbols = [line.strip() for line in f]
 
     symbols.append('SPY')
 
+    # print(len(symbols))
+    # print(symbols[:10])
+
     # TODO: We stopped the program at 391, continue on to finish last 100 from step 14.
-    start = pd.Timestamp('2020-01-01', tzinfo=ZoneInfo("America/New_York"))
-    end = pd.Timestamp('2026-01-01', tzinfo=ZoneInfo("America/New_York"))
+    # start = pd.Timestamp('2020-01-01', tzinfo=ZoneInfo("America/New_York"))
+    # end = pd.Timestamp('2026-01-01', tzinfo=ZoneInfo("America/New_York"))
 
     # i = 13*30
     # while i < len(symbols):
     #     obj.backfill_base_features(['open', 'close', 'high', 'low', 'trade_count', 'volume', 'vwap'], symbols[i:min(i+30, len(symbols))], start, end, TimeFrame(10, TimeFrameUnit.Minute), True)
     #     i += 30
 
-    # obj.backfill_surprise_features(symbols[:1], datetime(2020, 1, 1, 0, 0), datetime(2025, 1, 10, 0, 0), TimeFrame(10, TimeFrameUnit.Minute))
+
+    # backfill close log return
+    # obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0), feature='close')
+
+    # backfill wick's
+    # obj.backfill_wicks_body_range(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # backfill vix
+    # obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # backfill suprise
+    obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
-    #obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(1, TimeFrameUnit.Day), True)
+    # obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(1, TimeFrameUnit.Day), True)
 
     #res = obj.get_historical_data_util.get_historical_stock_prices(['AAPL'], datetime(2020, 1, 1), datetime(2025, 11, 1), TimeFrame.Minute)
     #print(len(res))
@@ -383,7 +398,7 @@ if __name__ == "__main__":
     # obj.backfill_wicks_body_range(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
     # obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0), feature='close')
 
-    obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
  
