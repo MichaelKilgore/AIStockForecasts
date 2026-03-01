@@ -17,6 +17,8 @@ from alpaca.data.enums import DataFeed
 from zoneinfo import ZoneInfo
 import yfinance as yf
 
+from ai_stock_forecasts.utils.yfinance_util import YfinanceUtil
+
 class GetHistoricalDataUtil:
     def __init__(self):
         load_dotenv()
@@ -28,6 +30,8 @@ class GetHistoricalDataUtil:
         print("Alpaca Secret:", self._alpaca_secret)
 
         self.stock_client = StockHistoricalDataClient(self._alpaca_key, self._alpaca_secret)
+
+        self.yfinance_util = YfinanceUtil()
 
     def get_latest_stock_prices(self, stocks: list[str]) -> list[Stock]:
         multisymbol_request_params = StockLatestQuoteRequest(symbol_or_symbols=stocks)
@@ -41,24 +45,18 @@ class GetHistoricalDataUtil:
         return res
 
     def get_historical_stock_prices(self, stocks: list[str], start: datetime, end: datetime, time_frame: TimeFrame = TimeFrame(amount=1, unit=TimeFrameUnit.Day)) -> list[StockBar]:
+        if time_frame.unit != TimeFrameUnit.Day or time_frame.amount != 1:
+            raise Exception('removed support for more finer grain units since data is definitely not clean in alpaca. We switched to yfinance as data source. Need to do more research to see if yfinance supports finer grains than daily')
+
         print(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
-        multisymbol_request_params = StockBarsRequest(symbol_or_symbols=stocks,
-                                                      timeframe=time_frame,
-                                                      start=start,
-                                                      end=end,
-                                                      feed=DataFeed.IEX,
-                                                      adjustment="split")
-
-        multisymbol_quotes = self.stock_client.get_stock_bars(multisymbol_request_params)
-
         res = []
+        for stock in stocks:
+            df = self.yfinance_util.get_historical_data(stock, start, end)
+            df.reset_index(drop=False)
 
-        for symbol, bars in multisymbol_quotes.data.items():
-            for bar in bars:
-                res.append(StockBar(close=bar.close, high=bar.high, low=bar.low, open=bar.open,
-                                    # symbol=symbol, timestamp=bar.timestamp.astimezone(ZoneInfo("America/New_York")), trade_count=bar.trade_count,
-                                    symbol=symbol, timestamp=bar.timestamp, trade_count=bar.trade_count,
-                                    volume=bar.volume, vwap=bar.vwap, time_frame=time_frame))
+            for row in df.itertuples(index=True):
+                res.append(StockBar(close=row.Close, high=row.High, low=row.Low, open=row.Open,
+                                    symbol=stock, timestamp=row.Index, trade_count=-1, volume=row.Volume, vwap=-1))
 
         return res
 
@@ -103,11 +101,14 @@ if __name__ == "__main__":
     end = datetime(2026, 1, 1)
 
     # res = obj.get_historical_stock_prices(["VIX"], start, end, TimeFrame(1, TimeFrameUnit.Day))
-    res = obj.get_historical_vix()
+    res = obj.get_historical_stock_prices(["AACB"], start, end, TimeFrame(1, TimeFrameUnit.Day))
 
-    print(res)
 
-    # res.sort()
-    # for val in res:
-    #     print(val)
+    # res = obj.get_historical_vix()
+
+    # print(res)
+
+    res.sort()
+    for val in res:
+        print(val.timestamp, val.close)
 

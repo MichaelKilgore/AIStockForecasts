@@ -112,4 +112,19 @@ We have two data modules which pull necessary data and constructs time series da
 
 * M1 mac seems to be more efficient for training than some of the smaller instances such as g4dn.xlarge, and g4dn.2xlarge. My recommendation is that unless you are gonna use an instance with a GPU at minimum its not worth running training via sagemaker. View some of the existing config_id's in configs.yaml file all the ids prefixed with m1 were run on a M1 Pro in under 3 hours.
 
+## Data Migration Notes
+
+### historical_data -> historical_data_v2
+
+historical_data had the data partitioned by symbol. But aggregating the data into that many separate files made it take a long time to pull the data locally so I migrated to v2 which partitions data by feature only.
+
+## historical_data_v2 -> historical_data_v3
+
+historical_data_v2 contains only 500 s&p symbols worth of data. historical_data_v3 contains 5000+ symbols
+
+## historical_data_v3 -> historical_data_v4
+
+historical_data_v4 pulls all the price history data from yfinance instead of alpaca as data in alpaca is often not accurate.
+
+
 

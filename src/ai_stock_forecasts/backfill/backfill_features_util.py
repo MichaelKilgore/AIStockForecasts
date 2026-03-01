@@ -386,10 +386,10 @@ if __name__ == "__main__":
     # backfill vix
     # obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
     # backfill suprise
-    obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
-    # obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'trade_count', 'volume', 'vwap'], symbols, datetime(2020, 1, 1), datetime(2025, 12, 31), TimeFrame(1, TimeFrameUnit.Day), True)
+    obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'volume'], symbols, datetime(2020, 1, 1), datetime(2026, 1, 1), TimeFrame(1, TimeFrameUnit.Day), True)
 
     #res = obj.get_historical_data_util.get_historical_stock_prices(['AAPL'], datetime(2020, 1, 1), datetime(2025, 11, 1), TimeFrame.Minute)
     #print(len(res))
