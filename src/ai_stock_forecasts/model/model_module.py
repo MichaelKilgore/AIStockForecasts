@@ -4,6 +4,7 @@ from typing import Union
 from lightning.pytorch import Callback, Trainer
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_forecasting import EncoderNormalizer, QuantileLoss, TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting.models.base import Prediction
 from pytorch_forecasting.models.temporal_fusion_transformer.tuning import optimize_hyperparameters
 from pytorch_forecasting.tuning.tuner import Tuner
 
@@ -98,7 +99,7 @@ class ModelModule:
         self.callbacks = [ self.checkpoint_callback, self.ckpt_best_callback, self.step_logging_callback ]
         # self.callbacks = [ self.early_stop, self.checkpoint_callback, self.ckpt_best_callback, self.step_logging_callback ]
 
-    def run_training(self, training_dataset: TimeSeriesDataSet, 
+    def run_training(self, training_dataset: TimeSeriesDataSet,
                      learning_rate: float, hidden_size: int,
                      attention_head_size: int, dropout: float,
                      hidden_continuous_size: int, lstm_layers: int,
@@ -143,8 +144,15 @@ class ModelModule:
         self.trainer.save_checkpoint(os.path.join(self.model_dir, 'tft_model.ckpt'))
 
     def load_model_from_checkpoint(self, model_id: str, map_location: str, load_last_ckpt: bool=False):
-        with self.s3_util.load_best_model_checkpoint(model_id, pull_last_ckpt=load_last_ckpt) as ckpt_path:
-            self.model = TemporalFusionTransformer.load_from_checkpoint(ckpt_path, map_location=torch.device(map_location), weights_only=False)
+        self.model_id = model_id
+        self.map_location = map_location
+        self.load_last_ckpt = load_last_ckpt
+
+        self._load_model_from_checkpoint()
+
+    def _load_model_from_checkpoint(self):
+        with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=self.load_last_ckpt) as ckpt_path:
+            self.model = TemporalFusionTransformer.load_from_checkpoint(ckpt_path, map_location=torch.device(self.map_location), weights_only=False)
 
     """ There is a bug with torch metrics where even if you specify map_location to something other than cuda
         loading in the model can still fail: https://github.com/pytorch/pytorch/issues/113973
@@ -175,25 +183,60 @@ class ModelModule:
             ckpt = torch.load(ckpt_path, map_location=map_location, weights_only=False)
             self.model.load_state_dict(ckpt['state_dict'], strict=False)
 
-    def run_batch_inference(self, dataloader: DataLoader, model_id: str, df: DataFrame, save_predictions: bool=True):
+    def run_batch_inference(self, dataloaders: list[DataLoader], model_id: str, df: DataFrame, save_predictions: bool=True):
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
         trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
-        self.predictions = self.model.predict(
-            dataloader,
-            mode=self.mode,
-            return_x=False,
-            return_y=True,
-            return_index=True,
-            trainer_kwargs=trainer_kwargs
-        )
+
+        self.predictions = None
+        for dl in dataloaders:
+            pred = self.model.predict(
+                dl,
+                mode=self.mode,
+                return_x=True,
+                return_y=True,
+                return_index=True,
+                trainer_kwargs=trainer_kwargs
+            )
+
+            if self.predictions:
+                self.predictions = self._append_predictions_chunk(pred)
+            else:
+                self.predictions = pred
 
         if save_predictions:
             self.s3_util.save_raw_predictions(model_id, self.predictions)
-        self.convert_raw_predictions_to_simpler_format(df)
+        self.predictionsDF = self.convert_raw_predictions_to_simpler_format(df)
         if save_predictions:
             self.s3_util.save_human_readable_predictions(model_id, self.predictionsDF)
+
+
+    def _append_predictions_chunk(self, p: Prediction):
+        x_combined = {
+            k: torch.cat([self.predictions.x[k], p.x[k]], dim=0)
+            for k in self.predictions.x
+        }
+
+        y_combined = tuple(
+            torch.cat([self.predictions.y[i], p.y[i]], dim=0)
+            if self.predictions.y[i] is not None
+            else None
+            for i in range(len(self.predictions.y))
+        )
+
+        return Prediction(
+            output=torch.cat([self.predictions.output, p.output], dim=0),
+
+            x=x_combined,
+
+            index=pd.concat([self.predictions.index, p.index], ignore_index=True),
+
+            # decoder_lengths=torch.cat([self.predictions.decoder_lengths, p.decoder_lengths], dim=0),
+            decoder_lengths=None,
+
+            y=y_combined
+        )
 
     def run_single_day_inference(self, dataloader: DataLoader, df: DataFrame):
         if not isinstance(self.model, TemporalFusionTransformer):
@@ -203,7 +246,7 @@ class ModelModule:
         self.predictions = self.model.predict(
             dataloader,
             mode=self.mode,
-            return_x=False,
+            return_x=True,
             return_y=True,
             return_index=True,
             trainer_kwargs=trainer_kwargs,
@@ -241,7 +284,7 @@ class ModelModule:
         p50 = np.round(y_pred_np[:, :, 1], 10)
         p70 = np.round(y_pred_np[:, :, 2], 10)
 
-        self.predictionsDF = DataFrame({
+        predictionsDF = DataFrame({
             "symbol": symbols,
             "timestamp": ts_np,
             "y": list(y_true_np),
@@ -251,19 +294,21 @@ class ModelModule:
         })
 
         # make sure rows are ordered correctly first
-        self.predictionsDF = self.predictionsDF.sort_values(["symbol", "timestamp"])
+        predictionsDF = predictionsDF.sort_values(["symbol", "timestamp"])
 
         # extract the scalar you want from the per-row array
-        self.predictionsDF["current_y"] = self.predictionsDF["y"].apply(lambda arr: arr[0])
+        predictionsDF["current_y"] = predictionsDF["y"].apply(lambda arr: arr[0])
 
         # shift within each symbol only
-        self.predictionsDF["current_y"] = (
-            self.predictionsDF.groupby("symbol")["current_y"].shift(1)
+        predictionsDF["current_y"] = (
+            predictionsDF.groupby("symbol")["current_y"].shift(1)
         )
 
-        self.predictionsDF = self.predictionsDF[
-            self.predictionsDF["current_y"].notna()
+        predictionsDF = predictionsDF[
+            predictionsDF["current_y"].notna()
         ]
+
+        return predictionsDF
 
 
     def append_actuals_to_simple_predictions(self, df: DataFrame):

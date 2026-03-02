@@ -151,7 +151,9 @@ class Orchestration:
         self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
         self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
 
-        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
+        # TODO: For whatever reason when you break up the data into multiple dataloaders, predictions can be slightly different, not sure why though.
+        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end, 10, 14)
+        # self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
         self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
 
         self.model_module = ModelModule(self.loss)
@@ -162,12 +164,9 @@ class Orchestration:
         del self.training_data_module.validation_dataset
         del self.training_data_module.train_dataloader
         del self.training_data_module.validation_dataloader
-        del self.training_data_module.test_dataset
+        del self.training_data_module.test_datasets
 
-        if (not isinstance(self.training_data_module.test_dataloader, DataLoader)):
-            raise Exception('something went wrong...')
-        else:
-                self.model_module.run_batch_inference(self.training_data_module.test_dataloader, self.model_id, self.training_data_module.df, save_predictions)
+        self.model_module.run_batch_inference(self.training_data_module.test_dataloaders, self.model_id, self.training_data_module.df, save_predictions)
 
     def run_evaluation(self):
         if not self.model_module or self.model_module.predictionsDF.empty:
@@ -445,7 +444,7 @@ def parse_args():
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=1)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=1)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)
@@ -480,7 +479,7 @@ def main():
     if args.run_training:
         orc.run_training()
     if args.run_batch_inference:
-        orc.run_batch_inference(save_predictions=True, load_last_ckpt=False)
+        orc.run_batch_inference(save_predictions=False, load_last_ckpt=False)
     if args.run_evaluation:
         orc.run_evaluation()
     if args.explain_model:

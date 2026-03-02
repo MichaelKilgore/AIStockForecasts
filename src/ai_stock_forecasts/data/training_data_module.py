@@ -6,10 +6,13 @@ from alpaca.data import TimeFrame, TimeFrameUnit
 from lightning_utilities.core.rank_zero import rank_zero_only
 from pandas import DataFrame, factorize, to_numeric
 from pytorch_forecasting import TimeSeriesDataSet
+from torch.utils.data.dataset import Subset
 from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 import pandas as pd
 import time
+import torch
+import numpy as np
 
 
 """
@@ -36,11 +39,11 @@ class TrainingDataModule(DataModule):
 
         self.training_dataset = None
         self.validation_dataset = None
-        self.test_dataset = None
+        self.test_datasets = None
 
         self.train_dataloader = None
         self.validation_dataloader = None
-        self.test_dataloader = None
+        self.test_dataloaders = None
 
 
     def _construct_df(self):
@@ -139,23 +142,69 @@ class TrainingDataModule(DataModule):
             stop_randomization=True,
         )
 
-    def construct_test_dataset(self, train_start: datetime, validation_end: datetime, test_end: datetime):
+    """
+
+    """
+    def construct_test_dataset(self, train_start: datetime, validation_end: datetime, test_end: datetime, num_chunks: int=-1, prediction_length: int=-1):
         if self.training_dataset == None:
             raise Exception("You have to construct the training_dataset before executing this function")
 
         validation_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= validation_end)
         validation_df = self.df.loc[validation_mask].copy()
         validation_max_idx = validation_df["time_idx"].max()
-
         test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end)
+
         test_df = self.df.loc[test_mask].copy()
 
-        self.test_dataset =  TimeSeriesDataSet.from_dataset(
-            dataset=self.training_dataset,
-            data=test_df,
-            min_prediction_idx=validation_max_idx + 1,
-            stop_randomization=True,
-        )
+        if num_chunks == -1:
+
+            self.test_datasets = [ TimeSeriesDataSet.from_dataset(
+                dataset=self.training_dataset,
+                data=test_df,
+                min_prediction_idx=validation_max_idx + 1,
+                stop_randomization=True,
+            ) ]
+        else:
+            # there is about 255 indexs
+
+            # this should cause: self.test_dataset.decoded_index time_idx_first_prediction min and max to be the same because of +1
+            # next we can try +50 to validate that that has exactly 50 time_idxs
+
+            # this successfully pulled exactly one time_idx
+            # test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end) & (self.df['time_idx'] <= validation_max_idx + 1 + 13)
+
+            # this successfully failed as expected
+            # test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end) & (self.df['time_idx'] <= validation_max_idx + 1 + 12)
+
+            # this successfully pulled exactly 50 time_idx's
+            # test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end) & (self.df['time_idx'] <= validation_max_idx + 50 + 13)
+
+            self.test_datasets = []
+
+            num_time_idxs = test_df['time_idx'].max() - (validation_max_idx + 1)
+            chunk_size = num_time_idxs // num_chunks 
+
+            for i in range(num_chunks):
+                if i == num_chunks-1:
+                    df = test_df.copy()
+                else:
+                    chunk_mask = test_df['time_idx'] <= (validation_max_idx + 1) + (prediction_length - 2) + (chunk_size * (i+1))
+                    df = test_df.loc[chunk_mask].copy()
+
+                dataset = TimeSeriesDataSet.from_dataset(
+                    dataset=self.training_dataset,
+                    data=df,
+                    min_prediction_idx=validation_max_idx + 1 + (chunk_size * (i)),
+                    stop_randomization=True,
+                )
+
+                self.test_datasets.append(dataset)
+
+        # min_prediction_idx = 1115 -> we need + chunk_size + lookforward_period
+        # filter test_df by time_idx <= 1115 + 50 + 14
+        #
+        # filter time_idx by less than validation_max_idx
+
 
     # TODO: we need to split these data loaders into like 15 evenly sized ones to handle super large predictions
     def construct_train_and_validation_dataloaders(self, batch_size: int, num_workers: int, pin_memory: bool):
@@ -168,11 +217,13 @@ class TrainingDataModule(DataModule):
                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
 
     def construct_test_dataloader(self, batch_size: int, num_workers: int, pin_memory: bool):
-        if self.test_dataset == None:
+        if self.test_datasets == None:
             raise Exception("You have to construct the training_dataset before executing this function")
 
-        self.test_dataloader = self.test_dataset.to_dataloader(train=False, batch_size=batch_size,
-                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=False)
+        self.test_dataloaders = [ ]
+        for dataset in self.test_datasets:
+            self.test_dataloaders.append(dataset.to_dataloader(train=False, batch_size=batch_size,
+                                num_workers=0, pin_memory=False, persistent_workers=False))
 
     @rank_zero_only
     def cache_df(self):
