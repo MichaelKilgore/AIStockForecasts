@@ -66,6 +66,9 @@ class TrainingDataModule(DataModule):
     def create_cached_df(self):
         features_data = self.s3_util.get_features_data(self.symbols, self.features, self.time_frame)
 
+        # I found like 8 out of millions of rows with value == nan so idk just gonna remove them here
+        features_data = features_data[features_data['value'] != 'nan']
+
         pivoted_features_data = self._pivot_features_data(features_data)
 
         pivoted_features_data['time_idx'] = factorize(pivoted_features_data['timestamp'], sort=True)[0].astype('int64')
