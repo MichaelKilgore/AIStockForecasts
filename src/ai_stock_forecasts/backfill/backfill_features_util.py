@@ -181,13 +181,18 @@ class BackfillFeaturesUtil:
         }
         long_df["type"] = long_df["feature"].map(type_map)
 
-        long_df["date"] = pd.to_datetime(long_df["timestamp"])
+        long_df["date"] = pd.to_datetime(long_df["timestamp"]).dt.date
 
         long_df["value"] = long_df["value"].astype(str)
         updated_timestamp = datetime.now()
         long_df['updated_timestamp'] = updated_timestamp
 
-        self.s3_util.upload_features_data_df(long_df, time_frame)
+        surprise_feature = long_df[long_df['feature'] == 'surprise']
+        is_earnings_day_feature = long_df[long_df['feature'] == 'is_earnings_day']
+
+        self.s3_util.upload_features_data_df(surprise_feature, time_frame)
+        self.s3_util.upload_features_data_df(is_earnings_day_feature, time_frame)
+
 
     def backfill_sandp_500_price_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), return_df: bool = False):
         # get SPY data
@@ -356,6 +361,7 @@ class BackfillFeaturesUtil:
 if __name__ == "__main__":
     obj = BackfillFeaturesUtil()
 
+    # with open('../constants/symbols.txt', 'r') as f:
     with open('src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
         symbols = [line.split('|')[0] for line in f]
 
@@ -386,10 +392,10 @@ if __name__ == "__main__":
     # backfill vix
     # obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
     # backfill suprise
-    # obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
 
 
-    obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'volume'], symbols, datetime(2020, 1, 1), datetime(2026, 1, 1), TimeFrame(1, TimeFrameUnit.Day), True)
+    # obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'volume'], symbols, datetime(2020, 1, 1), datetime(2026, 1, 1), TimeFrame(1, TimeFrameUnit.Day), True)
 
     #res = obj.get_historical_data_util.get_historical_stock_prices(['AAPL'], datetime(2020, 1, 1), datetime(2025, 11, 1), TimeFrame.Minute)
     #print(len(res))
