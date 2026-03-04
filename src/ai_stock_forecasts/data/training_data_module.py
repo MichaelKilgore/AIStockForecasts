@@ -226,7 +226,7 @@ class TrainingDataModule(DataModule):
         self.test_dataloaders = [ ]
         for dataset in self.test_datasets:
             self.test_dataloaders.append(dataset.to_dataloader(train=False, batch_size=batch_size,
-                                num_workers=0, pin_memory=False, persistent_workers=False))
+                                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)))
 
     @rank_zero_only
     def cache_df(self):

@@ -183,7 +183,7 @@ class ModelModule:
             ckpt = torch.load(ckpt_path, map_location=map_location, weights_only=False)
             self.model.load_state_dict(ckpt['state_dict'], strict=False)
 
-    def run_batch_inference(self, dataloaders: list[DataLoader], model_id: str, df: DataFrame, save_predictions: bool=True):
+    def run_batch_inference(self, dataloaders: list[DataLoader], model_id: str, df: DataFrame, save_predictions: bool=True, is_large: bool=False):
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
@@ -205,7 +205,8 @@ class ModelModule:
             else:
                 self.predictions = pred
 
-        if save_predictions:
+        # TODO: for large models with many symbols and large prediction windows s3 doesn't allow you to save files larger than 5gb so we would need to break this up but for now just gonna skip saving it cause I don't really use the raw predictions for anything currently anyways.
+        if save_predictions and not is_large:
             self.s3_util.save_raw_predictions(model_id, self.predictions)
         self.predictionsDF = self.convert_raw_predictions_to_simpler_format(df)
         if save_predictions:

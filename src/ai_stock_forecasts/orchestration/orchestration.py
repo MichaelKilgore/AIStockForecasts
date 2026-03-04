@@ -106,6 +106,10 @@ class Orchestration:
         else:
             self.target_normalizer = 'auto'
 
+        self.is_large = False
+        if 'is_large' in self.config:
+            self.is_large = self.config['is_large']
+
         self.model_module = None
 
     def run_training(self):
@@ -152,8 +156,10 @@ class Orchestration:
         self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
 
         # TODO: For whatever reason when you break up the data into multiple dataloaders, predictions can be slightly different, not sure why though.
-        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end, 10, 14)
-        # self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
+        if self.is_large:
+            self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end, 10, self.max_prediction_length)
+        else:
+            self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
         self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
 
         self.model_module = ModelModule(self.loss)
@@ -195,12 +201,12 @@ class Orchestration:
             self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=1, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=0)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
 
         filtered_df = dummy_data_module.df.copy()
         filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
         # Tuesday
-        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, '')
+        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
 
         self.model_module.plot_mape_by_symbol()
 
@@ -440,7 +446,7 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=1)
@@ -479,7 +485,7 @@ def main():
     if args.run_training:
         orc.run_training()
     if args.run_batch_inference:
-        orc.run_batch_inference(save_predictions=False, load_last_ckpt=False)
+        orc.run_batch_inference(save_predictions=True, load_last_ckpt=True)
     if args.run_evaluation:
         orc.run_evaluation()
     if args.explain_model:
