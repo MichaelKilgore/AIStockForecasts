@@ -15,7 +15,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
                  dont_buy_negative_stocks:bool=True, uncertainty_multiplier:float=0.4,
                  filter_out_x_most_volatile: int=0):
         super().__init__()
-        
+
         self.interval_days: int = interval_days
         self.num_stocks_purchased: int = num_stocks_purchased
         self.capital_gains_tax: float = capital_gains_tax
@@ -201,7 +201,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             return top_x
         else:
             eps = 1e-8
-            x = p50[:, self.interval_days-1]
+            x = p50[:, :self.interval_days].sum(axis=1)
             band_width_pct = np.abs(p70 - p30)
             y = band_width_pct.mean(axis=1)
 
