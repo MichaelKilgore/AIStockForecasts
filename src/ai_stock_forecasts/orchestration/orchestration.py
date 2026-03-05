@@ -172,7 +172,7 @@ class Orchestration:
         del self.training_data_module.validation_dataloader
         del self.training_data_module.test_datasets
 
-        self.model_module.run_batch_inference(self.training_data_module.test_dataloaders, self.model_id, self.training_data_module.df, save_predictions)
+        self.model_module.run_batch_inference(self.training_data_module.test_dataloaders, self.model_id, self.training_data_module.df, save_predictions, self.is_large)
 
     def run_evaluation(self):
         if not self.model_module or self.model_module.predictionsDF.empty:
@@ -201,7 +201,7 @@ class Orchestration:
             self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.003, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
 
         filtered_df = dummy_data_module.df.copy()
         filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
@@ -388,9 +388,14 @@ class Orchestration:
         self.model_module.plot_prediction(self.training_data_module.test_dataloader)
 
     def run_checkpoint_upload(self):
-        self.model_module = ModelModule(self.loss)
+        print("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
+        ans = input()
+        if ans == "y":
+            self.model_module = ModelModule(self.loss)
 
-        self.model_module.upload_checkpoints_to_s3(self.model_id)
+            self.model_module.upload_checkpoints_to_s3(self.model_id)
+        else:
+            print('skipping checkpoint upload...')
 
     def _init_trading_strategy(self) -> BaseTradingModule:
         strat = self.config['preferred_trading_strategy']
@@ -449,7 +454,7 @@ def parse_args():
     parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
-    parser.add_argument('--run_batch_inference', type=bool, default=1)
+    parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=1)
     parser.add_argument('--explain_model', type=bool, default=0)
 
