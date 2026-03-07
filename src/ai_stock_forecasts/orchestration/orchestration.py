@@ -23,6 +23,8 @@ from alpaca.trading.enums import OrderSide
 from ai_stock_forecasts.ordering.order_util import OrderUtil
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
+import pandas as pd
+
 class Orchestration:
     def __init__(self, symbols: list[str], model_id: str, config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -201,7 +203,7 @@ class Orchestration:
             self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.003, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
+        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=7, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
 
         filtered_df = dummy_data_module.df.copy()
         filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
@@ -270,14 +272,18 @@ class Orchestration:
         latest_order = self.db_util.get_latest_order(self.model_id)
         money_to_invest = latest_order.total_money_invested if latest_order != None else 25000
 
-        self.inference_data_module = InferenceDataModule(self.symbols, self.features, self.time_frame, 
+        self.inference_data_module = InferenceDataModule(self.symbols[:10], self.features + ['close', 'open', 'high', 'low'], self.time_frame,
                                                  self.max_lookback_period, self.max_prediction_length)
 
         # determine trading strategy
-        self._init_trading_strategy() 
+        self._init_trading_strategy()
 
         # determine if we have waited long enough (interval_days)
-        if not testing and (latest_order is not None and not self.inference_data_module.is_it_time_to_order_again(latest_order.order_timestamp, self.interval_days)):
+        curr_day = pd.Timestamp(datetime.now()).day_name()
+        if not testing and self.day_of_week != '' and self.day_of_week != curr_day:
+            print(f'Based on the day of week for this trading strategy: {self.day_of_week}, its too soon to execute a trade, returning early...')
+            return
+        elif not testing and (latest_order is not None and not self.inference_data_module.is_it_time_to_order_again(latest_order.order_timestamp, self.interval_days)):
             print(f'Based on the interval days for this trading strategy: {self.interval_days}, its too soon to execute a trade, returning early...')
             return
 
@@ -297,11 +303,12 @@ class Orchestration:
         # execute trading strategy
         self.model_module = ModelModule(self.loss)
 
-        with self.s3_util.load_best_model_checkpoint(self.model_id) as ckpt_path:
-            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=True) as ckpt_path:
+            ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
             hp = ckpt["hyper_parameters"]
             params = hp["dataset_parameters"]
- 
+        params["min_prediction_idx"] = None
+
         self.inference_data_module.construct_inference_dataset(params)
         self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
 
@@ -310,15 +317,19 @@ class Orchestration:
                                                               self.inference_data_module.inference_dataset, self.learning_rate,
                                                               self.hidden_size, self.attention_head_size,
                                                               self.dropout, self.hidden_continuous_size,
-                                                              self.lstm_layers, self.reduce_on_plateau_patience)
+                                                              self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=True)
 
 
         self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
 
-        top_x = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF)
+        top_x = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF, False)
 
         money_to_invest_in_each = float(new_money_left) / len(top_x)
 
+        inf_cols = ['symbol', 'timestamp', 'close']
+        merged_top_x = pd.merge(top_x, self.inference_data_module.df[inf_cols], on=['symbol', 'timestamp'], how='inner')
+
+        # TODO: This is not accurate when y is close_log_return
         top_x['quantity'] = money_to_invest_in_each / top_x['current_y']
 
         order_items = [
@@ -404,14 +415,24 @@ class Orchestration:
 
         self.interval_days = self.config[strat]['_interval_days']
 
+        filter_out_x_most_volatile = 0
+        if '_filter_out_x_most_volatile' in self.config[strat]:
+            filter_out_x_most_volatile = self.config[strat]['_filter_out_x_most_volatile']
+
+        self.day_of_week = ''
+        if '_day_of_week' in self.config[strat]:
+            self.day_of_week = self.config[strat]['_day_of_week']
+
+
         if performance_test == 'SimpleXDaysAheadBuying':
             self.trading_algorithm = SimpleXDaysAheadBuying(
-                                        interval_days=self.interval_days, 
-                                        num_stocks_purchased=self.config[strat]['_num_stocks_purchased'], 
+                                        interval_days=self.interval_days,
+                                        num_stocks_purchased=self.config[strat]['_num_stocks_purchased'],
                                         capital_gains_tax=self.config[strat]['_capital_gains_tax'],
                                         uncertainty_multiplier=self.config[strat]['_uncertainty_multiplier'],
                                         compound_money=self.config[strat]['_compound_money'],
-                                        dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'])
+                                        dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'],
+                                        filter_out_x_most_volatile=filter_out_x_most_volatile)
         else:
             raise Exception('The trading strategy specified is not supported')
 
@@ -455,11 +476,11 @@ def parse_args():
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=1)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
     parser.add_argument('--explain_model', type=bool, default=0)
 
     parser.add_argument('--run_inference', type=bool, default=0)
-    parser.add_argument('--execute_buy', type=bool, default=0)
+    parser.add_argument('--execute_buy', type=bool, default=1)
     parser.add_argument('--find_optimal_hyperparams', type=bool, default=0)
     parser.add_argument('--find_optimal_learning_rate', type=bool, default=0)
     parser.add_argument('--plot_prediction', type=bool, default=0)

@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pandas import DataFrame, Series
 import pandas as pd
 import requests
 from datetime import timezone
+from collections import defaultdict
 
 from dotenv import load_dotenv
 import os
@@ -60,12 +61,39 @@ class GetHistoricalDataUtil:
 
         return res
 
+    def batch_get_historical_stock_prices(self, stocks: list[str], start: datetime, end: datetime, time_frame: TimeFrame = TimeFrame(amount=1, unit=TimeFrameUnit.Day)) -> list[StockBar]:
+        if time_frame.unit != TimeFrameUnit.Day or time_frame.amount != 1:
+            raise Exception('removed support for more finer grain units since data is definitely not clean in alpaca. We switched to yfinance as data source. Need to do more research to see if yfinance supports finer grains than daily')
+
+        print(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
+
+        df = yf.download(
+            tickers=stocks,
+            start=start,
+            end=end,
+            group_by="ticker",
+            auto_adjust=True,
+            progress=True
+        )
+        df = (
+            df.stack(level="Ticker")
+              .reset_index()
+              .rename(columns={"Ticker": "symbol"})
+        )
+
+        res = []
+
+        for row in df.itertuples(index=True):
+            res.append(StockBar(close=row.Close, high=row.High, low=row.Low, open=row.Open,
+                                symbol=row.symbol, timestamp=row.Date, trade_count=-1, volume=row.Volume, vwap=-1))
+
+        return res
+
     def get_historical_vix(self, period: str='7y') -> DataFrame:
         ticker = yf.Ticker('^VIX')
         historical_data = ticker.history(period=period)
 
         return historical_data.reset_index()[['Date', 'Close']]
-
 
     """
         returns DataFrame Series like:
@@ -86,6 +114,9 @@ class GetHistoricalDataUtil:
 if __name__ == "__main__":
     obj = GetHistoricalDataUtil()
 
+    with open('/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
+        symbols = [line.split('|')[0] for line in f]
+
     # curr = datetime(2025, 10, 30)
     #curr = datetime(2020, 4, 28)
     # curr = datetime(2026, 1, 14)
@@ -101,7 +132,11 @@ if __name__ == "__main__":
     end = datetime(2026, 1, 1)
 
     # res = obj.get_historical_stock_prices(["VIX"], start, end, TimeFrame(1, TimeFrameUnit.Day))
-    res = obj.get_historical_stock_prices(["AACB"], start, end, TimeFrame(1, TimeFrameUnit.Day))
+    # res = obj.get_historical_stock_prices(["AACB"], start, end, TimeFrame(1, TimeFrameUnit.Day))
+    # res = obj.batch_get_historical_stock_prices(['AACB', 'AAPL'], start, end, TimeFrame(1, TimeFrameUnit.Day))
+    res = obj.get_today_stock_prices(symbols)
+
+
 
 
     # res = obj.get_historical_vix()

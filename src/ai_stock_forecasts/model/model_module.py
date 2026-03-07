@@ -252,7 +252,7 @@ class ModelModule:
             return_index=True,
             trainer_kwargs=trainer_kwargs,
         )
-        self.convert_raw_predictions_to_simpler_format(df)
+        self.predictionsDF = self.convert_raw_predictions_to_simpler_format(df, True)
 
 
     def load_raw_predictions(self, model_id: str, df: DataFrame):
@@ -262,7 +262,7 @@ class ModelModule:
     def load_human_readable_predictions(self, model_id: str):
         self.predictionsDF = self.s3_util.load_human_readable_predictions(model_id)
 
-    def convert_raw_predictions_to_simpler_format(self, df: DataFrame):
+    def convert_raw_predictions_to_simpler_format(self, df: DataFrame, is_single_day_inference: bool=False):
         timestamps = self._get_timestamps(df)
 
         y_pred = self.predictions.output
@@ -297,17 +297,20 @@ class ModelModule:
         # make sure rows are ordered correctly first
         predictionsDF = predictionsDF.sort_values(["symbol", "timestamp"])
 
-        # extract the scalar you want from the per-row array
-        predictionsDF["current_y"] = predictionsDF["y"].apply(lambda arr: arr[0])
+        if not is_single_day_inference:
+            # extract the scalar you want from the per-row array
+            predictionsDF["current_y"] = predictionsDF["y"].apply(lambda arr: arr[0])
 
-        # shift within each symbol only
-        predictionsDF["current_y"] = (
-            predictionsDF.groupby("symbol")["current_y"].shift(1)
-        )
+            # shift within each symbol only
+            predictionsDF["current_y"] = (
+                predictionsDF.groupby("symbol")["current_y"].shift(1)
+            )
 
-        predictionsDF = predictionsDF[
-            predictionsDF["current_y"].notna()
-        ]
+            predictionsDF = predictionsDF[
+                predictionsDF["current_y"].notna()
+            ]
+        else:
+            predictionsDF["current_y"] = self.predictions.x["encoder_target"][:, -1].cpu().numpy()
 
         return predictionsDF
 

@@ -11,24 +11,26 @@ from ai_stock_forecasts.utils.get_historical_data_util import GetHistoricalDataU
 from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.models.stock_bar import StockBar
 import pandas as pd
+import numpy as np
 
+# TODO: We need to make the data construction more generic and extendable. Right now data construction is hard coded. I.E. we expect certain set of features.
 class InferenceDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
-                 max_lookback_period: int, max_prediction_length: int):
+                 max_lookback_period: int, max_prediction_length: int, target: str='open'):
         self.curr_date = datetime.now()
         self.get_historical_data_util = GetHistoricalDataUtil()
         self.backfill_features_util = BackfillFeaturesUtil()
-        super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length)
+        super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length, target=target)
 
-    """ 
-    1. get alpaca data necessary
+    """
+    1. get yfinance data necessary
     2. get nasdaq features
     3. construct features
 
     goal:
 
     DF:
-        symbol, timestamp, time_idx, open, day_of_week, day_of_month, month, year, surprise, is_earnings_day
+        symbol, timestamp, time_idx, close_log_return, day_of_week, day_of_month, month, year, surprise, is_earnings_day
     """
     def _construct_df(self):
         """ We check twice as far back as we technically need because each time step is not a single day its a single day
@@ -39,10 +41,48 @@ class InferenceDataModule(DataModule):
         else: # TODO: Add support for other timeframes
             raise Exception(f'The time_frame: {self.time_frame} is not supported')
 
-        stock_bars = self.get_historical_data_util.get_historical_stock_prices(self.symbols, min_date_needed, self.curr_date, self.time_frame)
+        stock_bars = self.get_historical_data_util.batch_get_historical_stock_prices(self.symbols, min_date_needed, self.curr_date, self.time_frame)
         """ structure:
-                        symbol, timestamp, open, other features..."""
+                        symbol, timestamp, close, other features..."""
         base_df = self._form_starting_df_from_base_features(stock_bars)
+
+        base_df = base_df.sort_values(['symbol', 'timestamp'])
+
+        # calculate close_log_return
+        base_df['close_log_return'] = np.log(
+            base_df['close'].astype(float) /
+                base_df.groupby('symbol')['close'].shift(1).astype(float)
+        ).astype(float)
+        base_df = base_df[base_df['close_log_return'] != 'nan']
+
+
+        base_df['range'] = base_df['high'] - base_df['low']
+        base_df['body'] = base_df['close'] - base_df['open']
+        base_df['lower_wick'] = np.minimum(base_df['close'], base_df['open']) - base_df['low']
+        base_df['upper_wick'] = base_df['high'] - np.maximum(base_df['open'], base_df['close'])
+
+        # vix_log
+        vix_records = self.get_historical_data_util.get_historical_vix('1y')
+
+        vix_records['Date'] = vix_records['Date'].dt.tz_localize(None)
+
+        vix_records['vix_log'] = np.log(vix_records['Close']).astype(str)
+
+        vix_records['timestamp'] = vix_records['Date']
+
+        vix_records['timestamp'] = pd.to_datetime(vix_records['timestamp'], utc=True).dt.tz_convert(None).dt.normalize()
+
+        vix_records = vix_records[['timestamp', 'vix_log']]
+
+        vix_records.set_index(['timestamp'])
+
+        base_df['timestamp'] = pd.to_datetime(base_df['timestamp'], utc=True).dt.tz_convert(None).dt.normalize()
+        # TODO: this is wrong base_df timestamp is 0 - 1300
+        base_df = base_df.merge(
+            vix_records,
+            on="timestamp",
+            how="left"
+        )
 
         """for some of the feature data we don't have the same hour, min listed in the timestamp
             so we have to make sure we are grouping by correct time frame unit.
@@ -72,14 +112,19 @@ class InferenceDataModule(DataModule):
         joined_df = base_df.join(surprise_features, how='outer').reset_index(drop=False)
 
         # Filters out nan rows in the past (weekends) and rows in the future that are weekends
-        joined_df = joined_df[ ( (joined_df['open'].notna()) & (joined_df['timestamp'] <= self.curr_date) ) | ( (joined_df['timestamp'] > self.curr_date) & (joined_df['timestamp'].dt.weekday < 5) )]
+        joined_df = joined_df[ ( (joined_df['close_log_return'].notna()) & (joined_df['timestamp'] <= self.curr_date) ) | ( (joined_df['timestamp'] > self.curr_date) & (joined_df['timestamp'].dt.weekday < 5) )]
+
+        # add close_log_return
 
         # Filters down to only the rows we need for lookback and lookforward
         joined_df = self._filter_by_lookback_and_lookforward(joined_df)
 
         # we have to set target in future to non NaN otherwise constructing the TimeSeries Dataset fails
         mask = (joined_df["timestamp"] > self.curr_date) & (joined_df["open"].isna())
-        joined_df.loc[mask, "open"] = 0.0
+        joined_df.loc[mask, "close_log_return"] = 0.0
+        cols = ["range", "body", "lower_wick", "upper_wick", "vix_log"]
+
+        joined_df[cols] = joined_df[cols].fillna(0.0)
 
 
         # include year and month feature
@@ -121,6 +166,7 @@ class InferenceDataModule(DataModule):
             if col in self.known_categoricals:
                 joined_df[col] = joined_df[col].astype(int).astype(str).astype('category')
 
+        joined_df = joined_df[['symbol', 'timestamp', 'close_log_return', 'range', 'body', 'lower_wick', 'upper_wick', 'vix_log', 'surprise', 'is_earnings_day', 'year', 'month', 'day_of_month', 'day_of_week', 'time_idx', 'close']]
         self.df = joined_df
 
 
@@ -163,7 +209,7 @@ class InferenceDataModule(DataModule):
                 continue
 
             last_row = sub.loc[sub["time_idx"].idxmax()]
-            latest_open = last_row["open"]
+            latest_open = last_row["close_log_return"]
 
             money_left += float(latest_open) * float(order_item.quantity)
 
@@ -219,10 +265,10 @@ class InferenceDataModule(DataModule):
 
 if __name__ == "__main__":
     # with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
-    with open('../../constants/symbols.txt', 'r') as f:
+    with open('../constants/symbols.txt', 'r') as f:
         symbols = [line.strip() for line in f]
 
-    obj = InferenceDataModule(symbols, ['open', 'day_of_week', 'day_of_month', 'month', 'year', 'surprise', 'is_earnings_day'], TimeFrame(1, TimeFrameUnit.Day), 60, 2)
+    obj = InferenceDataModule(symbols[:10], ['close_log_return', 'day_of_week', 'day_of_month', 'month', 'year', 'surprise', 'is_earnings_day', 'range', 'body', 'lower_wick', 'upper_wick', 'vix_log', 'close', 'high', 'low', 'open'], TimeFrame(1, TimeFrameUnit.Day), 90, 14, target='close_log_return')
 
 
 
@@ -230,4 +276,3 @@ if __name__ == "__main__":
 
 
 
-    

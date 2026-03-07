@@ -1270,7 +1270,7 @@ configs:
     is_large: True
     _performance_test_1:
       _test_strategy: SimpleXDaysAheadBuying
-      _note: 'Used latest checkpoint and did not save the inference output to s3'
+      _note: 'Used latest checkpoint'
       _test_range: '2025-01-01 - 2026-01-01'
       _interval_days: 5
       _num_stocks_purchased: 10
@@ -1278,8 +1278,9 @@ configs:
       _uncertainty_multiplier: 0.000
       _compound_money: True
       _dont_buy_negative_stocks: True
-      _money_made: 60017.80037831034
-      _annual_sharpe: 1.467243842027196
+      _money_made: 47964.19368878967
+      _annual_sharpe: 1.8078636959385632
+      _filter_out_x_most_volatile: 200
       _day_of_week: 'Tuesday'
   ubuntu-with-many-symbols-and-yfinance-and-lower-size:
     notes: 'trying lower model size to see if we can prevent overfitting.'

@@ -162,8 +162,8 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             "y_pred_p50": [ [ ], [ ]... ],
             "y_pred_p70": [ [ ], [ ]... ],
     """
-    def generate_buy_list(self, predictions: DataFrame) -> DataFrame:
-        top_x = self._determine_top_x(predictions)
+    def generate_buy_list(self, predictions: DataFrame, prediction_raw_num: bool=False) -> DataFrame:
+        top_x = self._determine_top_x(predictions, prediction_raw_num)
 
         return top_x
 
