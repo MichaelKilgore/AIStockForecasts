@@ -1,12 +1,13 @@
 
 from datetime import datetime, timedelta
-from typing import Union
+from typing import Optional, Union
 
 from alpaca.data import TimeFrame, TimeFrameUnit
 from ai_stock_forecasts.models.order import Order, OrderItem
 from pandas import DataFrame, factorize
 from pytorch_forecasting import TimeSeriesDataSet
 from ai_stock_forecasts.backfill.backfill_features_util import BackfillFeaturesUtil
+from ai_stock_forecasts.utils.date_util import get_next_market_open_day
 from ai_stock_forecasts.utils.get_historical_data_util import GetHistoricalDataUtil
 from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.models.stock_bar import StockBar
@@ -16,8 +17,9 @@ import numpy as np
 # TODO: We need to make the data construction more generic and extendable. Right now data construction is hard coded. I.E. we expect certain set of features.
 class InferenceDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
-                 max_lookback_period: int, max_prediction_length: int, target: str='open'):
-        self.curr_date = datetime.now()
+                 max_lookback_period: int, max_prediction_length: int, target: str='open', curr_date: Optional[datetime] = None):
+        self.curr_date = curr_date if curr_date else datetime.now()
+
         self.get_historical_data_util = GetHistoricalDataUtil()
         self.backfill_features_util = BackfillFeaturesUtil()
         super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length, target=target)

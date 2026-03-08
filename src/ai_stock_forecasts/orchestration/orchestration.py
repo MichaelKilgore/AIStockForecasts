@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 import yaml
 import os
 from ai_stock_forecasts.losses.weighted_quantile_loss import WeightedQuantileLoss
+from ai_stock_forecasts.utils.date_util import get_prev_market_open_day
 from ai_stock_forecasts.utils.dynamodb_util import DynamoDBUtil
 from ai_stock_forecasts.data.inference_data_module import InferenceDataModule
 from ai_stock_forecasts.model.model_module import ModelModule
@@ -263,23 +264,29 @@ class Orchestration:
 
         print(stocks)
 
+    ''' Setting testing to true does not gate any logic. All it does is move the day we run inference for back 
+        till we reach a day the stock market was actually open. It thing skips any logic preventing trading earlier than intended.
+
+        This is helpful for testing this workflow on days when the market isn't open like on Saturdays.'''
     def execute_buy(self, testing: bool=False):
         if not testing and not self.order_util.is_stock_market_open():
             print(f'Stock market not open right now, returning...')
             return
+
+        curr_day = datetime.now() if not testing else get_prev_market_open_day()
 
         # get latest order details
         latest_order = self.db_util.get_latest_order(self.model_id)
         money_to_invest = latest_order.total_money_invested if latest_order != None else 25000
 
         self.inference_data_module = InferenceDataModule(self.symbols[:10], self.features + ['close', 'open', 'high', 'low'], self.time_frame,
-                                                 self.max_lookback_period, self.max_prediction_length)
+                                                 self.max_lookback_period, self.max_prediction_length, curr_date=curr_day)
 
         # determine trading strategy
         self._init_trading_strategy()
 
         # determine if we have waited long enough (interval_days)
-        curr_day = pd.Timestamp(datetime.now()).day_name()
+        day_of_week = pd.Timestamp(curr_day).day_name()
         if not testing and self.day_of_week != '' and self.day_of_week != curr_day:
             print(f'Based on the day of week for this trading strategy: {self.day_of_week}, its too soon to execute a trade, returning early...')
             return
@@ -294,7 +301,7 @@ class Orchestration:
                 OrderItem(r.symbol, round(r.quantity, 2), OrderSide.SELL)
                 for r in latest_order.order_items
             ]
-            sell_order = Order(self.model_id, datetime.now(), money_to_invest, order_items=order_items)
+            sell_order = Order(self.model_id, curr_day, money_to_invest, order_items=order_items)
             new_money_left = self.inference_data_module.update_money_to_invest(sell_order)
             sell_order.total_money_invested = round(float(new_money_left), 2)
             self.db_util.upload_order(sell_order)
