@@ -13,15 +13,18 @@ from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.models.stock_bar import StockBar
 import pandas as pd
 import numpy as np
+import time
 
 # TODO: We need to make the data construction more generic and extendable. Right now data construction is hard coded. I.E. we expect certain set of features.
 class InferenceDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
-                 max_lookback_period: int, max_prediction_length: int, target: str='open', curr_date: Optional[datetime] = None):
+                 max_lookback_period: int, max_prediction_length: int, target: str='open', curr_date: Optional[datetime] = None,
+                 volume_filter: int=100000):
         self.curr_date = curr_date if curr_date else datetime.now()
 
         self.get_historical_data_util = GetHistoricalDataUtil()
         self.backfill_features_util = BackfillFeaturesUtil()
+        self.volume_filter = volume_filter
         super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length, target=target)
 
     """
@@ -43,10 +46,17 @@ class InferenceDataModule(DataModule):
         else: # TODO: Add support for other timeframes
             raise Exception(f'The time_frame: {self.time_frame} is not supported')
 
-        stock_bars = self.get_historical_data_util.batch_get_historical_stock_prices(self.symbols, min_date_needed, self.curr_date, self.time_frame)
+        # stock_bars = self.get_historical_data_util.batch_get_historical_stock_prices(self.symbols[:2500], min_date_needed, self.curr_date, self.time_frame)
+        stock_bars = self.get_historical_data_util.get_historical_stock_prices(self.symbols, min_date_needed, self.curr_date, self.time_frame)
         """ structure:
                         symbol, timestamp, close, other features..."""
         base_df = self._form_starting_df_from_base_features(stock_bars)
+
+        # base_df = base_df
+        high_volume_symbols = base_df.groupby('symbol').mean()
+        high_volume_symbols = high_volume_symbols[high_volume_symbols['volume'] >= self.volume_filter]
+
+        base_df = base_df[base_df['symbol'].isin(high_volume_symbols.index)]
 
         base_df = base_df.sort_values(['symbol', 'timestamp'])
 
@@ -63,6 +73,8 @@ class InferenceDataModule(DataModule):
         base_df['lower_wick'] = np.minimum(base_df['close'], base_df['open']) - base_df['low']
         base_df['upper_wick'] = base_df['high'] - np.maximum(base_df['open'], base_df['close'])
 
+        # we get rate limited by yfinance for previous download if it was large
+        time.sleep(30)
         # vix_log
         vix_records = self.get_historical_data_util.get_historical_vix('1y')
 
@@ -113,8 +125,11 @@ class InferenceDataModule(DataModule):
 
         joined_df = base_df.join(surprise_features, how='outer').reset_index(drop=False)
 
+        joined_df = joined_df[joined_df['symbol'].isin(high_volume_symbols.index)]
+
         # Filters out nan rows in the past (weekends) and rows in the future that are weekends
-        joined_df = joined_df[ ( (joined_df['close_log_return'].notna()) & (joined_df['timestamp'] <= self.curr_date) ) | ( (joined_df['timestamp'] > self.curr_date) & (joined_df['timestamp'].dt.weekday < 5) )]
+        curr_date = np.datetime64(self.curr_date.replace(tzinfo=None))
+        joined_df = joined_df[ ( (joined_df['close_log_return'].notna()) & (joined_df['timestamp'] <= curr_date) ) | ( (joined_df['timestamp'] > curr_date) & (joined_df['timestamp'].dt.weekday < 5) )]
 
         # add close_log_return
 
@@ -122,7 +137,7 @@ class InferenceDataModule(DataModule):
         joined_df = self._filter_by_lookback_and_lookforward(joined_df)
 
         # we have to set target in future to non NaN otherwise constructing the TimeSeries Dataset fails
-        mask = (joined_df["timestamp"] > self.curr_date) & (joined_df["open"].isna())
+        mask = (joined_df["timestamp"] > curr_date) & (joined_df["open"].isna())
         joined_df.loc[mask, "close_log_return"] = 0.0
         cols = ["range", "body", "lower_wick", "upper_wick", "vix_log"]
 
@@ -202,11 +217,13 @@ class InferenceDataModule(DataModule):
         return (curr_order_time_idx - last_order_time_idx) >= interval_days
 
     def update_money_to_invest(self, order: Order) -> float:
+        curr_date = np.datetime64(self.curr_date.replace(tzinfo=None))
+
         money_left = 0
         ts = pd.to_datetime(self.df["timestamp"], errors="coerce")
 
         for order_item in order.order_items:
-            sub = self.df.loc[(self.df["symbol"] == order_item.symbol) & ts.le(self.curr_date)]
+            sub = self.df.loc[(self.df["symbol"] == order_item.symbol) & ts.le(curr_date)]
             if sub.empty:
                 continue
 
@@ -235,7 +252,7 @@ class InferenceDataModule(DataModule):
         return DataFrame(rows)
 
     def _filter_by_lookback_and_lookforward(self, df: DataFrame) -> DataFrame:
-        curr_ts = pd.Timestamp(self.curr_date)
+        curr_ts = np.datetime64(self.curr_date)
 
         # unique (symbol, timestamp) pairs
         st = df[["symbol", "timestamp"]].drop_duplicates()
@@ -270,7 +287,7 @@ if __name__ == "__main__":
     with open('../constants/symbols.txt', 'r') as f:
         symbols = [line.strip() for line in f]
 
-    obj = InferenceDataModule(symbols[:10], ['close_log_return', 'day_of_week', 'day_of_month', 'month', 'year', 'surprise', 'is_earnings_day', 'range', 'body', 'lower_wick', 'upper_wick', 'vix_log', 'close', 'high', 'low', 'open'], TimeFrame(1, TimeFrameUnit.Day), 90, 14, target='close_log_return')
+    obj = InferenceDataModule(symbols[:10], ['close_log_return', 'day_of_week', 'day_of_month', 'month', 'year', 'surprise', 'is_earnings_day', 'range', 'body', 'lower_wick', 'upper_wick', 'vix_log', 'close', 'high', 'low', 'open', 'volume'], TimeFrame(1, TimeFrameUnit.Day), 90, 14, target='close_log_return')
 
 
 
