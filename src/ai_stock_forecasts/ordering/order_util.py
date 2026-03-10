@@ -12,6 +12,7 @@ import base64
 import json
 import requests
 
+import math
 
 class OrderUtil:
     def __init__(self):
@@ -29,7 +30,7 @@ class OrderUtil:
         for order_item in order.order_items:
             market_order_data = MarketOrderRequest(
                 symbol=order_item.symbol,
-                qty=order_item.quantity,
+                qty=math.floor(order_item.quantity),
                 side=order_item.order_type,
                 time_in_force=TimeInForce.DAY
             )

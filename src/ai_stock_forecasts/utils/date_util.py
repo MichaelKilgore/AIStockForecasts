@@ -29,6 +29,8 @@ def get_prev_market_open_day(d: Optional[datetime] = None):
     while d in h or d.weekday() >= 5:
         d = d - timedelta(days=1)
 
+    d.replace(hour=20)
+
     return d
 
 

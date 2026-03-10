@@ -17,6 +17,7 @@ from finance_calendars import finance_calendars as fc
 from alpaca.data.enums import DataFeed
 from zoneinfo import ZoneInfo
 import yfinance as yf
+import time
 
 from ai_stock_forecasts.utils.yfinance_util import YfinanceUtil
 
@@ -51,9 +52,16 @@ class GetHistoricalDataUtil:
 
         print(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
         res = []
-        for stock in stocks:
-            df = self.yfinance_util.get_historical_data(stock, start, end)
-            df.reset_index(drop=False)
+        for i, stock in enumerate(stocks):
+            print(f'pulling {i}, {stock}...')
+            while(True):
+                try:
+                    df = self.yfinance_util.get_historical_data(stock, start, end)
+                    df.reset_index(drop=False)
+                except:
+                    print('being rate limited waiting 10 seconds to try again')
+                    time.sleep(10)
+                break
 
             for row in df.itertuples(index=True):
                 res.append(StockBar(close=row.Close, high=row.High, low=row.Low, open=row.Open,

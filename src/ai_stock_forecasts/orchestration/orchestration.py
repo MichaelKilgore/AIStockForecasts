@@ -25,6 +25,7 @@ from ai_stock_forecasts.ordering.order_util import OrderUtil
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
 import pandas as pd
+import math
 
 class Orchestration:
     def __init__(self, symbols: list[str], model_id: str, config_path: str):
@@ -279,7 +280,7 @@ class Orchestration:
         latest_order = self.db_util.get_latest_order(self.model_id)
         money_to_invest = latest_order.total_money_invested if latest_order != None else 25000
 
-        self.inference_data_module = InferenceDataModule(self.symbols[:10], self.features + ['close', 'open', 'high', 'low'], self.time_frame,
+        self.inference_data_module = InferenceDataModule(self.symbols, self.features + ['close', 'open', 'high', 'low', 'volume'], self.time_frame,
                                                  self.max_lookback_period, self.max_prediction_length, curr_date=curr_day)
 
         # determine trading strategy
@@ -320,7 +321,7 @@ class Orchestration:
         self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
 
 
-        self.model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator, 
+        self.model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator,
                                                               self.inference_data_module.inference_dataset, self.learning_rate,
                                                               self.hidden_size, self.attention_head_size,
                                                               self.dropout, self.hidden_continuous_size,
@@ -329,18 +330,16 @@ class Orchestration:
 
         self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
 
+        self.model_module.append_actuals_to_simple_predictions(self.inference_data_module.df)
+
         top_x = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF, False)
 
         money_to_invest_in_each = float(new_money_left) / len(top_x)
 
-        inf_cols = ['symbol', 'timestamp', 'close']
-        merged_top_x = pd.merge(top_x, self.inference_data_module.df[inf_cols], on=['symbol', 'timestamp'], how='inner')
-
-        # TODO: This is not accurate when y is close_log_return
-        top_x['quantity'] = money_to_invest_in_each / top_x['current_y']
+        top_x['quantity'] = money_to_invest_in_each / top_x['close']
 
         order_items = [
-            OrderItem(r.symbol, round(r.quantity, 2), OrderSide.BUY)
+            OrderItem(r.symbol, math.floor(r.quantity), OrderSide.BUY)
             for r in top_x.itertuples(index=False)
         ]
 
