@@ -195,19 +195,19 @@ class Orchestration:
                                                        'close',
                                                        self.target_normalizer)
 
-            model_module.append_actuals_to_simple_predictions(predictionsDF, dummy_data_module.df)
+            predictionsDF = model_module.append_actuals_to_simple_predictions(predictionsDF, dummy_data_module.df)
 
             filtered_df = dummy_data_module.df.copy()
             filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
 
 
-        trading_algorithm = SimpleXDaysAheadBuying(interval_days=7, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
+        trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, compound_money=False, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
 
 
         # Tuesday
         trading_algorithm.simulate(predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
 
-        model_module.plot_mape_by_symbol()
+        # model_module.plot_mape_by_symbol()
 
         # results = []
         # for i in list([1,2]):
@@ -354,9 +354,9 @@ def parse_args():
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=1)
 
-    parser.add_argument('--execute_buy', type=bool, default=1)
+    parser.add_argument('--execute_buy', type=bool, default=0)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
