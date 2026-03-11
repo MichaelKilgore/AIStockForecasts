@@ -142,7 +142,6 @@ class InferenceDataModule(DataModule):
 
         joined_df[cols] = joined_df[cols].fillna(0.0)
 
-
         # include year and month feature
         if (self.time_frame.unit == TimeFrameUnit.Month 
                 or self.time_frame.unit == TimeFrameUnit.Week
@@ -194,46 +193,13 @@ class InferenceDataModule(DataModule):
             stop_randomization=True,
         )
 
+
     def construct_inference_dataloader(self, inference_dataset: TimeSeriesDataSet,
                                        batch_size: int, num_workers: int, pin_memory: bool) -> DataLoader:
 
         return inference_dataset.to_dataloader(train=False, batch_size=batch_size,
                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)) 
 
-    # TODO: These functions don't belong in the inference data module. Should probably move everything to some sort of
-    #       buy coordinator class.
-    def is_it_time_to_order_again(self, latest_order_timestamp: datetime, interval_days: int=1):
-        ts = pd.to_datetime(self.df["timestamp"], errors="coerce")
-
-        latest_day = pd.Timestamp(latest_order_timestamp).normalize()
-        curr_day = pd.Timestamp.now().normalize()
-
-        s = self.df.loc[ts.le(latest_day), ["time_idx"]].sort_index()
-        last_order_time_idx = s.iloc[-1]["time_idx"]
-
-        s = self.df.loc[ts.le(curr_day), ["time_idx"]].sort_index()
-        curr_order_time_idx = s.iloc[-1]["time_idx"]
-
-        return (curr_order_time_idx - last_order_time_idx) >= interval_days
-
-    def update_money_to_invest(self, order: Order) -> float:
-        curr_date = np.datetime64(self.curr_date.replace(tzinfo=None))
-
-        money_left = 0
-        ts = pd.to_datetime(self.df["timestamp"], errors="coerce")
-
-        for order_item in order.order_items:
-            sub = self.df.loc[(self.df["symbol"] == order_item.symbol) & ts.le(curr_date)]
-            if sub.empty:
-                continue
-
-            last_row = sub.loc[sub["time_idx"].idxmax()]
-            latest_open = last_row["close_log_return"]
-
-            money_left += float(latest_open) * float(order_item.quantity)
-
-        return money_left
- 
 
     def _form_starting_df_from_base_features(self, stock_bars: list[StockBar]) -> DataFrame:
         rows = []
@@ -250,6 +216,7 @@ class InferenceDataModule(DataModule):
             rows.append(new_row)
 
         return DataFrame(rows)
+
 
     def _filter_by_lookback_and_lookforward(self, df: DataFrame) -> DataFrame:
         curr_ts = np.datetime64(self.curr_date.replace(tzinfo=None))

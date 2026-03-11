@@ -5,7 +5,6 @@ from alpaca.data import TimeFrame, TimeFrameUnit
 from datetime import datetime, timezone
 from pytorch_forecasting import QuantileLoss, TimeSeriesDataSet
 import torch
-from torch.utils.data import DataLoader
 import yaml
 import os
 from ai_stock_forecasts.losses.weighted_quantile_loss import WeightedQuantileLoss
@@ -116,11 +115,11 @@ class Orchestration:
 
     def run_training(self):
         training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                       self.time_frame,
-                                                       self.max_lookback_period,
-                                                       self.max_prediction_length,
-                                                       self.target,
-                                                       self.target_normalizer)
+                                                   self.time_frame,
+                                                   self.max_lookback_period,
+                                                   self.max_prediction_length,
+                                                   self.target,
+                                                   self.target_normalizer)
 
         train_dataset, val_dataset = training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
         train_dataloader, val_dataloader = training_data_module.construct_train_and_validation_dataloaders(train_dataset, val_dataset, self.batch_size, self.num_workers, self.use_gpu)
@@ -196,7 +195,7 @@ class Orchestration:
                                                        'close',
                                                        self.target_normalizer)
 
-            model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
+            model_module.append_actuals_to_simple_predictions(predictionsDF, dummy_data_module.df)
 
             filtered_df = dummy_data_module.df.copy()
             filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
@@ -225,15 +224,12 @@ class Orchestration:
 
         This is helpful for testing this workflow on days when the market isn't open like on Saturdays.'''
     def execute_buy(self, testing: bool=False):
-        if not testing and not self.order_util.is_stock_market_open():
-            print(f'Stock market not open right now, returning...')
-            return
 
-        curr_day = datetime.now() if not testing else get_prev_market_open_day()
+        curr_day = get_prev_market_open_day()
 
         # get latest order details
         latest_order = self.db_util.get_latest_order(self.model_id)
-        money_to_invest = latest_order.total_money_invested if latest_order != None else 25000
+        money_to_invest = 25000
 
         inference_data_module = InferenceDataModule(self.symbols, self.features + ['close', 'open', 'high', 'low', 'volume'], self.time_frame,
                                                  self.max_lookback_period, self.max_prediction_length, curr_date=curr_day)
@@ -241,25 +237,14 @@ class Orchestration:
         # determine trading strategy
         trading_strategy = self._init_trading_strategy()
 
-        # determine if we have waited long enough (interval_days)
-        day_of_week = pd.Timestamp(curr_day).day_name()
-        if not testing and day_of_week != '' and day_of_week != curr_day:
-            print(f'Based on the day of week for this trading strategy: {day_of_week}, its too soon to execute a trade, returning early...')
-            return
-        elif not testing and (latest_order is not None and not inference_data_module.is_it_time_to_order_again(latest_order.order_timestamp, self.interval_days)):
-            print(f'Based on the interval days for this trading strategy: {self.interval_days}, its too soon to execute a trade, returning early...')
-            return
-
         # sell previous order
-        new_money_left = money_to_invest
         if latest_order is not None:
             order_items = [
                 OrderItem(r.symbol, round(r.quantity, 2), OrderSide.SELL)
                 for r in latest_order.order_items
             ]
-            sell_order = Order(self.model_id, curr_day, money_to_invest, order_items=order_items)
-            new_money_left = inference_data_module.update_money_to_invest(sell_order)
-            sell_order.total_money_invested = round(float(new_money_left), 2)
+
+            sell_order = Order(self.model_id, curr_day, order_items=order_items)
             self.db_util.upload_order(sell_order)
             self.order_util.close_all_positions()
 
@@ -275,13 +260,11 @@ class Orchestration:
         inf_dataset = inference_data_module.construct_inference_dataset(params)
         inf_dataloader = inference_data_module.construct_inference_dataloader(inf_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
-
         model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator,
                                                           inf_dataset, self.learning_rate,
                                                           self.hidden_size, self.attention_head_size,
                                                           self.dropout, self.hidden_continuous_size,
                                                           self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=True)
-
 
         predictionsDF = model_module.run_single_day_inference(inf_dataloader, inference_data_module.df)
 
@@ -289,9 +272,7 @@ class Orchestration:
 
         top_x = trading_strategy.generate_buy_list(predictionsDF, False)
 
-        money_to_invest_in_each = float(new_money_left) / len(top_x)
-
-        top_x['quantity'] = money_to_invest_in_each / top_x['close']
+        top_x['quantity'] = money_to_invest / top_x['close']
 
         order_items = [
             OrderItem(r.symbol, math.floor(r.quantity), OrderSide.BUY)
@@ -299,7 +280,7 @@ class Orchestration:
         ]
 
         # upload orders to db
-        order = Order(self.model_id, datetime.now(), round(new_money_left, 2), order_items=order_items)
+        order = Order(self.model_id, datetime.now(), order_items=order_items)
         self.db_util.upload_order(order)
 
         # execute orders in alpaca

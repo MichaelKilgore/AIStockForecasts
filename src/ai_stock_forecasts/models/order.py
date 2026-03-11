@@ -10,9 +10,7 @@ class OrderItem:
 
 class Order:
 
-    def __init__(self, model_id: str, order_timestamp: datetime,
-                 total_money_invested: float, order_items: list[OrderItem]):
+    def __init__(self, model_id: str, order_timestamp: datetime, order_items: list[OrderItem]):
         self.model_id: str = model_id
         self.order_timestamp: datetime = order_timestamp
-        self.total_money_invested: float = total_money_invested
         self.order_items = order_items
