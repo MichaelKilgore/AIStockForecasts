@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Union
 
 from alpaca.data import TimeFrame, TimeFrameUnit
+from torch.utils.data import DataLoader
 from ai_stock_forecasts.models.order import Order, OrderItem
 from pandas import DataFrame, factorize
 from pytorch_forecasting import TimeSeriesDataSet
@@ -131,8 +132,6 @@ class InferenceDataModule(DataModule):
         curr_date = np.datetime64(self.curr_date.replace(tzinfo=None))
         joined_df = joined_df[ ( (joined_df['close_log_return'].notna()) & (joined_df['timestamp'] <= curr_date) ) | ( (joined_df['timestamp'] > curr_date) & (joined_df['timestamp'].dt.weekday < 5) )]
 
-        # add close_log_return
-
         # Filters down to only the rows we need for lookback and lookforward
         joined_df = self._filter_by_lookback_and_lookforward(joined_df)
 
@@ -187,21 +186,22 @@ class InferenceDataModule(DataModule):
         self.df = joined_df
 
 
-    def construct_inference_dataset(self, params):
-        self.inference_dataset = TimeSeriesDataSet.from_parameters(
+    def construct_inference_dataset(self, params) -> TimeSeriesDataSet:
+        return TimeSeriesDataSet.from_parameters(
             params,
             self.df,
             predict=True,
             stop_randomization=True,
         )
 
-    def construct_inference_dataloader(self, batch_size: int, num_workers: int, pin_memory: bool):
-        if self.inference_dataset == None:
-            raise Exception("You have to construct the inference_dataset before executing this function")
+    def construct_inference_dataloader(self, inference_dataset: TimeSeriesDataSet,
+                                       batch_size: int, num_workers: int, pin_memory: bool) -> DataLoader:
 
-        self.inference_dataloader = self.inference_dataset.to_dataloader(train=False, batch_size=batch_size,
+        return inference_dataset.to_dataloader(train=False, batch_size=batch_size,
                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)) 
 
+    # TODO: These functions don't belong in the inference data module. Should probably move everything to some sort of
+    #       buy coordinator class.
     def is_it_time_to_order_again(self, latest_order_timestamp: datetime, interval_days: int=1):
         ts = pd.to_datetime(self.df["timestamp"], errors="coerce")
 
@@ -252,7 +252,7 @@ class InferenceDataModule(DataModule):
         return DataFrame(rows)
 
     def _filter_by_lookback_and_lookforward(self, df: DataFrame) -> DataFrame:
-        curr_ts = np.datetime64(self.curr_date)
+        curr_ts = np.datetime64(self.curr_date.replace(tzinfo=None))
 
         # unique (symbol, timestamp) pairs
         st = df[["symbol", "timestamp"]].drop_duplicates()

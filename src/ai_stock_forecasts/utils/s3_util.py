@@ -176,7 +176,7 @@ class S3ParquetUtil:
         data = obj['Body'].read()
         return cloudpickle.loads(data)
 
-    def load_human_readable_predictions(self, model_id: str):
+    def load_human_readable_predictions(self, model_id: str) -> pd.DataFrame:
         key = 'model_predictions_readable/'+model_id+'.pkl'
         print(f'loading human readable predictions for model_id: {model_id} from {key}')
 

@@ -6,6 +6,7 @@ from alpaca.data import TimeFrame, TimeFrameUnit
 from lightning_utilities.core.rank_zero import rank_zero_only
 from pandas import DataFrame, factorize, to_numeric
 from pytorch_forecasting import TimeSeriesDataSet
+from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Subset
 from ai_stock_forecasts.data.data_module import DataModule
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
@@ -23,6 +24,7 @@ class TrainingDataModule(DataModule):
     def __init__(self, symbols: list[str], features: list[str], time_frame: Union[TimeFrame, str],
                  max_lookback_period: int, max_prediction_length: int, target: str = 'open',
                  target_normalizer: str = 'auto'):
+
         self.s3_util = S3ParquetUtil()
 
         """
@@ -36,14 +38,6 @@ class TrainingDataModule(DataModule):
         self.cache_path = os.path.join(self.cache_dir, f"pivoted_{time_frame.amount_value}_{time_frame.unit_value}.parquet")
 
         super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length, target, target_normalizer)
-
-        self.training_dataset = None
-        self.validation_dataset = None
-        self.test_datasets = None
-
-        self.train_dataloader = None
-        self.validation_dataloader = None
-        self.test_dataloaders = None
 
 
     def _construct_df(self):
@@ -112,13 +106,13 @@ class TrainingDataModule(DataModule):
         return wide
 
     def construct_training_and_validation_datasets(self, train_start: datetime, train_end: datetime,
-                                                   validation_end: datetime):
+                                                   validation_end: datetime) -> tuple[TimeSeriesDataSet, TimeSeriesDataSet]:
         train_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= train_end)
         train_df = self.df.loc[train_mask].copy()
 
         print(f'setting target to: {self.target}')
         print(f'setting target_normalizer to: {self.target_normalizer}')
-        self.training_dataset = TimeSeriesDataSet(
+        training_dataset = TimeSeriesDataSet(
             train_df,
             time_idx="time_idx",
             group_ids=["symbol"],
@@ -138,19 +132,17 @@ class TrainingDataModule(DataModule):
         validation_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= validation_end)
         validation_df = self.df.loc[validation_mask].copy()
 
-        self.validation_dataset = TimeSeriesDataSet.from_dataset(
-            dataset=self.training_dataset,
+        validation_dataset = TimeSeriesDataSet.from_dataset(
+            dataset=training_dataset,
             data=validation_df,
             min_prediction_idx=training_max_idx + 1,
             stop_randomization=True,
         )
 
-    """
+        return training_dataset, validation_dataset
 
-    """
-    def construct_test_dataset(self, train_start: datetime, validation_end: datetime, test_end: datetime, num_chunks: int=-1, prediction_length: int=-1):
-        if self.training_dataset == None:
-            raise Exception("You have to construct the training_dataset before executing this function")
+
+    def construct_test_datasets(self, train_dataset: TimeSeriesDataSet, train_start: datetime, validation_end: datetime, test_end: datetime, num_chunks: int=-1, prediction_length: int=-1) -> list[TimeSeriesDataSet]:
 
         validation_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= validation_end)
         validation_df = self.df.loc[validation_mask].copy()
@@ -161,28 +153,14 @@ class TrainingDataModule(DataModule):
 
         if num_chunks == -1:
 
-            self.test_datasets = [ TimeSeriesDataSet.from_dataset(
-                dataset=self.training_dataset,
+            datasets = [ TimeSeriesDataSet.from_dataset(
+                dataset=train_dataset,
                 data=test_df,
                 min_prediction_idx=validation_max_idx + 1,
                 stop_randomization=True,
             ) ]
         else:
-            # there is about 255 indexs
-
-            # this should cause: self.test_dataset.decoded_index time_idx_first_prediction min and max to be the same because of +1
-            # next we can try +50 to validate that that has exactly 50 time_idxs
-
-            # this successfully pulled exactly one time_idx
-            # test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end) & (self.df['time_idx'] <= validation_max_idx + 1 + 13)
-
-            # this successfully failed as expected
-            # test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end) & (self.df['time_idx'] <= validation_max_idx + 1 + 12)
-
-            # this successfully pulled exactly 50 time_idx's
-            # test_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= test_end) & (self.df['time_idx'] <= validation_max_idx + 50 + 13)
-
-            self.test_datasets = []
+            datasets = []
 
             num_time_idxs = test_df['time_idx'].max() - (validation_max_idx + 1)
             chunk_size = num_time_idxs // num_chunks 
@@ -195,38 +173,35 @@ class TrainingDataModule(DataModule):
                     df = test_df.loc[chunk_mask].copy()
 
                 dataset = TimeSeriesDataSet.from_dataset(
-                    dataset=self.training_dataset,
+                    dataset=train_dataset,
                     data=df,
                     min_prediction_idx=validation_max_idx + 1 + (chunk_size * (i)),
                     stop_randomization=True,
                 )
 
-                self.test_datasets.append(dataset)
+                datasets.append(dataset)
 
-        # min_prediction_idx = 1115 -> we need + chunk_size + lookforward_period
-        # filter test_df by time_idx <= 1115 + 50 + 14
-        #
-        # filter time_idx by less than validation_max_idx
+        return datasets
 
 
-    # TODO: we need to split these data loaders into like 15 evenly sized ones to handle super large predictions
-    def construct_train_and_validation_dataloaders(self, batch_size: int, num_workers: int, pin_memory: bool):
-        if self.training_dataset == None or self.validation_dataset == None:
-            raise Exception("You have to construct the training_dataset before executing this function")
+    def construct_train_and_validation_dataloaders(self, train_dataset: TimeSeriesDataSet, val_dataset: TimeSeriesDataSet,
+                                                   batch_size: int, num_workers: int, pin_memory: bool) -> tuple[DataLoader, DataLoader]:
 
-        self.train_dataloader = self.training_dataset.to_dataloader(train=True, batch_size=batch_size,
+        train_dataloader = train_dataset.to_dataloader(train=True, batch_size=batch_size,
                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
-        self.validation_dataloader = self.validation_dataset.to_dataloader(train=False, batch_size=batch_size,
+        val_dataloader = val_dataset.to_dataloader(train=False, batch_size=batch_size,
                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
 
-    def construct_test_dataloader(self, batch_size: int, num_workers: int, pin_memory: bool):
-        if self.test_datasets == None:
-            raise Exception("You have to construct the training_dataset before executing this function")
+        return train_dataloader, val_dataloader
 
-        self.test_dataloaders = [ ]
-        for dataset in self.test_datasets:
-            self.test_dataloaders.append(dataset.to_dataloader(train=False, batch_size=batch_size,
+    def construct_test_dataloaders(self, test_datasets: list[TimeSeriesDataSet], batch_size: int, num_workers: int, pin_memory: bool) -> list[DataLoader]:
+
+        dls = []
+        for dataset in test_datasets:
+            dls.append(dataset.to_dataloader(train=False, batch_size=batch_size,
                                 num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0)))
+
+        return dls
 
     @rank_zero_only
     def cache_df(self):

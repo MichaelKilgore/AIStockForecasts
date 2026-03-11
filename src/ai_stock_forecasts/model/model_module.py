@@ -239,7 +239,7 @@ class ModelModule:
             y=y_combined
         )
 
-    def run_single_day_inference(self, dataloader: DataLoader, df: DataFrame):
+    def run_single_day_inference(self, dataloader: DataLoader, df: DataFrame) -> DataFrame:
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
 
@@ -252,17 +252,17 @@ class ModelModule:
             return_index=True,
             trainer_kwargs=trainer_kwargs,
         )
-        self.predictionsDF = self.convert_raw_predictions_to_simpler_format(df, True)
+        return self.convert_raw_predictions_to_simpler_format(df, True)
 
 
     def load_raw_predictions(self, model_id: str, df: DataFrame):
         self.predictions = self.s3_util.load_raw_predictions(model_id)
         self.convert_raw_predictions_to_simpler_format(df)
 
-    def load_human_readable_predictions(self, model_id: str):
-        self.predictionsDF = self.s3_util.load_human_readable_predictions(model_id)
+    def load_human_readable_predictions(self, model_id: str) -> DataFrame:
+        return self.s3_util.load_human_readable_predictions(model_id)
 
-    def convert_raw_predictions_to_simpler_format(self, df: DataFrame, is_single_day_inference: bool=False):
+    def convert_raw_predictions_to_simpler_format(self, df: DataFrame, is_single_day_inference: bool=False) -> DataFrame:
         timestamps = self._get_timestamps(df)
 
         y_pred = self.predictions.output
@@ -315,9 +315,9 @@ class ModelModule:
         return predictionsDF
 
 
-    def append_actuals_to_simple_predictions(self, df: DataFrame):
+    def append_actuals_to_simple_predictions(self, predictionsDF: DataFrame, df: DataFrame) -> DataFrame:
         # time_idx, timestamp, symbol, feature_a, feature_b, ...
-        self.predictionsDF = self.predictionsDF.merge(df, on=['symbol', 'timestamp'], how='inner')
+        return predictionsDF.merge(df, on=['symbol', 'timestamp'], how='inner')
 
     def plot_mape_by_symbol(self):
         self.mapeResultDF = self.predictionsDF.copy()

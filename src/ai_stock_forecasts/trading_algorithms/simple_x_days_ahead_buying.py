@@ -23,7 +23,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         self.dont_buy_negative_stocks: bool = dont_buy_negative_stocks
         self.uncertainty_multiplier: float = uncertainty_multiplier
         self.filter_out_x_most_volatile=filter_out_x_most_volatile
-        print(f"set trading params to: interval_days: {self.interval_days}, num_stocks_purchased: {self.num_stocks_purchased}, capital_gains_tax: {self.capital_gains_tax}, compound_money: {self.compound_money}, dont_buy_negative_stocks: {self.dont_buy_negative_stocks}, uncertainty_multiplier: {self.uncertainty_multiplier}")
+        print(f"set trading params to: interval_days: {self.interval_days}, num_stocks_purchased: {self.num_stocks_purchased}, capital_gains_tax: {self.capital_gains_tax}, compound_money: {self.compound_money}, dont_buy_negative_stocks: {self.dont_buy_negative_stocks}, uncertainty_multiplier: {self.uncertainty_multiplier}, filter_out_x_most_volatile: {self.filter_out_x_most_volatile}")
 
 
     """
@@ -36,7 +36,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             "y_pred_p30": [ [ ], [ ]... ],
             "y_pred_p50": [ [ ], [ ]... ],
             "y_pred_p70": [ [ ], [ ]... ],
-            "open": [ price, price, ... ],
+            "close": [ price, price, ... ],
 
         predicting_raw_num means that we are predicting something like 'open' which means
         in order for us to understand the models forecast we have to check y against current_y
@@ -218,7 +218,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             return top_x
 
     def _filter_out_x_most_volatile(self, predictions: DataFrame, pivot_df: DataFrame) -> DataFrame:
-        print('filtering out x most volatile...')
+        print(f'filtering out {self.filter_out_x_most_volatile} most volatile...')
         top_x_symbols = (
             pivot_df
                 .groupby('symbol')['close_log_return']

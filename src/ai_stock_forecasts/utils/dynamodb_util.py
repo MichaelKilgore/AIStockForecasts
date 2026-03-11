@@ -80,7 +80,7 @@ class DynamoDBUtil:
 
         order_items = [ OrderItem(order['symbol'], order['quantity'], OrderSide(order['order_type'])) for order in latest['orders']]
 
-        return Order(latest['model_id'], datetime.strptime(latest['order_timestamp'], "%Y-%m-%d %H:%M:%S.%f"), latest['total_money_invested'], order_items)
+        return Order(latest['model_id'], datetime.fromisoformat(latest['order_timestamp']), latest['total_money_invested'], order_items)
 
 
 if __name__ == "__main__":

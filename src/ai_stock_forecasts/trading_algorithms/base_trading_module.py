@@ -14,7 +14,7 @@ class BaseTradingModule:
         pass
 
     @abstractmethod
-    def generate_buy_list(self, predictions: DataFrame) -> list[str]:
+    def generate_buy_list(self, predictions: DataFrame, prediction_raw_num: bool=False) -> DataFrame:
         pass
 
     """ assumes we can generate 5% returns annually risk free.

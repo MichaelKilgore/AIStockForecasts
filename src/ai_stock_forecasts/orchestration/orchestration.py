@@ -1,5 +1,6 @@
 
 import argparse
+from typing import Optional
 from alpaca.data import TimeFrame, TimeFrameUnit
 from datetime import datetime, timezone
 from pytorch_forecasting import QuantileLoss, TimeSeriesDataSet
@@ -46,7 +47,6 @@ class Orchestration:
         self.train_start = datetime.fromisoformat(self.config['train_start']).replace(tzinfo=timezone.utc)
         self.train_end = datetime.fromisoformat(self.config['train_end']).replace(tzinfo=timezone.utc)
         self.val_end = datetime.fromisoformat(self.config['val_end']).replace(tzinfo=timezone.utc)
-        # self.test_end = datetime.fromisoformat('2025-02-01').replace(tzinfo=timezone.utc)
         self.test_end = datetime.fromisoformat(self.config['test_end']).replace(tzinfo=timezone.utc)
 
         self.features: list[str] = self.config['features']
@@ -114,86 +114,80 @@ class Orchestration:
         if 'is_large' in self.config:
             self.is_large = self.config['is_large']
 
-        self.model_module = None
-
     def run_training(self):
-        self.training_data_module = TrainingDataModule(self.symbols, self.features,
+        training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
                                                        self.max_lookback_period,
                                                        self.max_prediction_length,
                                                        self.target,
                                                        self.target_normalizer)
 
-        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
+        train_dataset, val_dataset = training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
+        train_dataloader, val_dataloader = training_data_module.construct_train_and_validation_dataloaders(train_dataset, val_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
         if self.config['devices'] > 1:
-            self.training_data_module.cache_df()
+            training_data_module.cache_df()
 
-        self.model_module = ModelModule(self.loss)
+        model_module = ModelModule(self.loss)
 
         if self.fine_tuning_model_id:
-            self._load_model(self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
+            self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
 
-        if (not isinstance(self.training_data_module.training_dataset, TimeSeriesDataSet) or
-           not isinstance(self.training_data_module.train_dataloader, DataLoader) or
-           not isinstance(self.training_data_module.validation_dataloader, DataLoader)):
-            raise Exception('something went wrong...')
-        else:
-            self.model_module.run_training(self.training_data_module.training_dataset, self.learning_rate, self.hidden_size,
-                                           self.attention_head_size, self.dropout, self.hidden_continuous_size,
-                                           self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
-                                           self.accelerator, self.devices, self.training_data_module.train_dataloader,
-                                           self.training_data_module.validation_dataloader, self.gradient_clip_val)
+        model_module.run_training(train_dataset, self.learning_rate, self.hidden_size,
+                                   self.attention_head_size, self.dropout, self.hidden_continuous_size,
+                                   self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
+                                   self.accelerator, self.devices, train_dataloader,
+                                   val_dataloader, self.gradient_clip_val)
 
-        self.model_module.upload_checkpoints_to_s3(self.model_id)
+        model_module.upload_checkpoints_to_s3(self.model_id)
 
     def run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
-        self.training_data_module = TrainingDataModule(self.symbols, self.features,
+        training_data_module = TrainingDataModule(self.symbols, self.features,
                                                        self.time_frame,
                                                        self.max_lookback_period,
                                                        self.max_prediction_length,
                                                        self.target,
                                                        self.target_normalizer)
 
-        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
+        train_dataset, val_dataset = training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
+        train_dataloader, val_dataloader = training_data_module.construct_train_and_validation_dataloaders(train_dataset, val_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
         # TODO: For whatever reason when you break up the data into multiple dataloaders, predictions can be slightly different, not sure why though.
         if self.is_large:
-            self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end, 10, self.max_prediction_length)
+            test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end, 10, self.max_prediction_length)
         else:
-            self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
-        self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+            test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end)
 
-        self.model_module = ModelModule(self.loss)
+        test_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
 
-        self._load_model(load_last_ckpt=load_last_ckpt)
+        model_module = ModelModule(self.loss)
 
-        del self.training_data_module.training_dataset
-        del self.training_data_module.validation_dataset
-        del self.training_data_module.train_dataloader
-        del self.training_data_module.validation_dataloader
-        del self.training_data_module.test_datasets
+        self._load_model(model_module, train_dataset, load_last_ckpt=load_last_ckpt)
 
-        self.model_module.run_batch_inference(self.training_data_module.test_dataloaders, self.model_id, self.training_data_module.df, save_predictions, self.is_large)
+        del train_dataset
+        del val_dataset
+        del train_dataloader
+        del val_dataloader
+        del test_datasets
+
+        model_module.run_batch_inference(test_dataloaders, self.model_id, training_data_module.df, save_predictions, self.is_large)
 
     def run_evaluation(self):
-        if not self.model_module or self.model_module.predictionsDF.empty:
-            self.model_module = ModelModule(self.loss)
+        model_module = ModelModule(self.loss)
 
-            try:
-                self.model_module.load_human_readable_predictions(self.model_id)
-            except:
-                raise Exception('You must run batch inference before attempting to run evaluation')
+        try:
+            predictionsDF = model_module.load_human_readable_predictions(self.model_id)
+        except:
+            raise Exception('You must run batch inference before attempting to run evaluation')
 
 
         """ If our model is predicting something other than actual stock numbers
             we want to pull a real stock number instead and evaluate with that.
 
             For example, predicting open_log_return is a calculated field and we want to calculate how much money we would actually make. To do that we can either reverse engineer the feature or better yet, just pull open and use that instead. Which is what we are doing.
-            """ 
+        """
         dummy_data_module = None
+        filtered_df: Optional[pd.DataFrame] = None
         if self.target not in ['close', 'high', 'low', 'open']:
             dummy_data_module = TrainingDataModule(self.symbols, ['close', 'close_log_return'],
                                                        self.time_frame,
@@ -202,17 +196,19 @@ class Orchestration:
                                                        'close',
                                                        self.target_normalizer)
 
-            self.model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
+            model_module.append_actuals_to_simple_predictions(dummy_data_module.df)
+
+            filtered_df = dummy_data_module.df.copy()
+            filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
 
 
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=7, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
+        trading_algorithm = SimpleXDaysAheadBuying(interval_days=7, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.000, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
 
-        filtered_df = dummy_data_module.df.copy()
-        filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
+
         # Tuesday
-        self.trading_algorithm.simulate(self.model_module.predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
+        trading_algorithm.simulate(predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
 
-        self.model_module.plot_mape_by_symbol()
+        model_module.plot_mape_by_symbol()
 
         # results = []
         # for i in list([1,2]):
@@ -223,47 +219,6 @@ class Orchestration:
         #             results.append(([i,j,k], self.trading_algorithm.simulate(self.model_module.predictionsDF)))
         #             print(results[-1])
         # print(results)
-
-    def explain_model(self):
-        self.training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                       self.time_frame,
-                                                       self.max_lookback_period, self.max_prediction_length,
-                                                       self.target, self.target_normalizer)
-
-        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
-
-        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
-        self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
-
-        self.model_module = ModelModule(self.loss)
-
-        self._load_model()
-
-        if (not isinstance(self.training_data_module.train_dataloader, DataLoader)):
-            raise Exception('something went wrong...')
-        else:
-            self.model_module.interpret_predictions(self.training_data_module.train_dataloader)
-
-    def run_inference(self):
-        self.inference_data_module = InferenceDataModule(self.symbols, self.features, self.time_frame, 
-                                                         self.max_lookback_period, self.max_prediction_length)
-
-        self.model_module = ModelModule(self.loss)
-
-        # TODO: Sometimes when models are trained on different hardware, loading in the model this way doesn't work.
-        self.model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
- 
-        self.inference_data_module.construct_inference_dataset(self.model_module.model.hparams["dataset_parameters"])
-        self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
-
-        self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
-
-        self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=2, num_stocks_purchased=50, capital_gains_tax=0.35, uncertainty_multiplier=0.3, dont_buy_negative_stocks=True)
-
-        stocks = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF)
-
-        print(stocks)
 
     ''' Setting testing to true does not gate any logic. All it does is move the day we run inference for back 
         till we reach a day the stock market was actually open. It thing skips any logic preventing trading earlier than intended.
@@ -280,18 +235,18 @@ class Orchestration:
         latest_order = self.db_util.get_latest_order(self.model_id)
         money_to_invest = latest_order.total_money_invested if latest_order != None else 25000
 
-        self.inference_data_module = InferenceDataModule(self.symbols, self.features + ['close', 'open', 'high', 'low', 'volume'], self.time_frame,
+        inference_data_module = InferenceDataModule(self.symbols, self.features + ['close', 'open', 'high', 'low', 'volume'], self.time_frame,
                                                  self.max_lookback_period, self.max_prediction_length, curr_date=curr_day)
 
         # determine trading strategy
-        self._init_trading_strategy()
+        trading_strategy = self._init_trading_strategy()
 
         # determine if we have waited long enough (interval_days)
         day_of_week = pd.Timestamp(curr_day).day_name()
-        if not testing and self.day_of_week != '' and self.day_of_week != curr_day:
-            print(f'Based on the day of week for this trading strategy: {self.day_of_week}, its too soon to execute a trade, returning early...')
+        if not testing and day_of_week != '' and day_of_week != curr_day:
+            print(f'Based on the day of week for this trading strategy: {day_of_week}, its too soon to execute a trade, returning early...')
             return
-        elif not testing and (latest_order is not None and not self.inference_data_module.is_it_time_to_order_again(latest_order.order_timestamp, self.interval_days)):
+        elif not testing and (latest_order is not None and not inference_data_module.is_it_time_to_order_again(latest_order.order_timestamp, self.interval_days)):
             print(f'Based on the interval days for this trading strategy: {self.interval_days}, its too soon to execute a trade, returning early...')
             return
 
@@ -303,13 +258,13 @@ class Orchestration:
                 for r in latest_order.order_items
             ]
             sell_order = Order(self.model_id, curr_day, money_to_invest, order_items=order_items)
-            new_money_left = self.inference_data_module.update_money_to_invest(sell_order)
+            new_money_left = inference_data_module.update_money_to_invest(sell_order)
             sell_order.total_money_invested = round(float(new_money_left), 2)
             self.db_util.upload_order(sell_order)
             self.order_util.close_all_positions()
 
         # execute trading strategy
-        self.model_module = ModelModule(self.loss)
+        model_module = ModelModule(self.loss)
 
         with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=True) as ckpt_path:
             ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
@@ -317,22 +272,22 @@ class Orchestration:
             params = hp["dataset_parameters"]
         params["min_prediction_idx"] = None
 
-        self.inference_data_module.construct_inference_dataset(params)
-        self.inference_data_module.construct_inference_dataloader(self.batch_size, self.num_workers, self.use_gpu)
+        inf_dataset = inference_data_module.construct_inference_dataset(params)
+        inf_dataloader = inference_data_module.construct_inference_dataloader(inf_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
 
-        self.model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator,
-                                                              self.inference_data_module.inference_dataset, self.learning_rate,
-                                                              self.hidden_size, self.attention_head_size,
-                                                              self.dropout, self.hidden_continuous_size,
-                                                              self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=True)
+        model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator,
+                                                          inf_dataset, self.learning_rate,
+                                                          self.hidden_size, self.attention_head_size,
+                                                          self.dropout, self.hidden_continuous_size,
+                                                          self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=True)
 
 
-        self.model_module.run_single_day_inference(self.inference_data_module.inference_dataloader, self.inference_data_module.df)
+        predictionsDF = model_module.run_single_day_inference(inf_dataloader, inference_data_module.df)
 
-        self.model_module.append_actuals_to_simple_predictions(self.inference_data_module.df)
+        predictionsDF = model_module.append_actuals_to_simple_predictions(predictionsDF, inference_data_module.df)
 
-        top_x = self.trading_algorithm.generate_buy_list(self.model_module.predictionsDF, False)
+        top_x = trading_strategy.generate_buy_list(predictionsDF, False)
 
         money_to_invest_in_each = float(new_money_left) / len(top_x)
 
@@ -350,67 +305,13 @@ class Orchestration:
         # execute orders in alpaca
         self.order_util.place_order(order)
 
-    def find_optimal_hyperparams(self):
-        self.training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                       self.time_frame,
-                                                       self.max_lookback_period, self.max_prediction_length)
-
-        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
-
-        if self.config['devices'] > 1:
-            self.training_data_module.cache_df()
-
-        self.model_module = ModelModule(self.loss)
-
-        self.model_module.find_optimal_hyperparameters(self.training_data_module.train_dataloader, self.training_data_module.validation_dataloader)
-
-    def find_optimal_learning_rate(self):
-        self.training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                       self.time_frame,
-                                                       self.max_lookback_period, self.max_prediction_length)
-
-        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
-
-        if self.config['devices'] > 1:
-            self.training_data_module.cache_df()
-
-        self.model_module = ModelModule(self.loss)
-
-        self._load_model()
-
-        self.model_module.find_optimal_learning_rate(self.training_data_module.train_dataloader,
-                                                     self.training_data_module.validation_dataloader,
-                                                     self.max_epochs, self.accelerator, self.devices)
-
-    def plot_predictions(self):
-        self.training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                       self.time_frame,
-                                                       self.max_lookback_period,
-                                                       self.max_prediction_length,
-                                                       self.target,
-                                                       self.target_normalizer)
-
-        self.training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        self.training_data_module.construct_train_and_validation_dataloaders(self.batch_size, self.num_workers, self.use_gpu)
-
-        self.training_data_module.construct_test_dataset(self.train_start, self.val_end, self.test_end)
-        self.training_data_module.construct_test_dataloader(self.batch_size, self.num_workers, self.use_gpu)
-
-        self.model_module = ModelModule(self.loss)
-
-        self._load_model()
-
-        self.model_module.plot_prediction(self.training_data_module.test_dataloader)
-
     def run_checkpoint_upload(self):
         print("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
         ans = input()
         if ans == "y":
-            self.model_module = ModelModule(self.loss)
+            model_module = ModelModule(self.loss)
 
-            self.model_module.upload_checkpoints_to_s3(self.model_id)
+            model_module.upload_checkpoints_to_s3(self.model_id)
         else:
             print('skipping checkpoint upload...')
 
@@ -431,46 +332,36 @@ class Orchestration:
 
 
         if performance_test == 'SimpleXDaysAheadBuying':
-            self.trading_algorithm = SimpleXDaysAheadBuying(
-                                        interval_days=self.interval_days,
-                                        num_stocks_purchased=self.config[strat]['_num_stocks_purchased'],
-                                        capital_gains_tax=self.config[strat]['_capital_gains_tax'],
-                                        uncertainty_multiplier=self.config[strat]['_uncertainty_multiplier'],
-                                        compound_money=self.config[strat]['_compound_money'],
-                                        dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'],
-                                        filter_out_x_most_volatile=filter_out_x_most_volatile)
+            return SimpleXDaysAheadBuying(
+                    interval_days=self.interval_days,
+                    num_stocks_purchased=self.config[strat]['_num_stocks_purchased'],
+                    capital_gains_tax=self.config[strat]['_capital_gains_tax'],
+                    uncertainty_multiplier=self.config[strat]['_uncertainty_multiplier'],
+                    compound_money=self.config[strat]['_compound_money'],
+                    dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'],
+                    filter_out_x_most_volatile=filter_out_x_most_volatile)
         else:
             raise Exception('The trading strategy specified is not supported')
 
-    def _load_model(self, model_id='', modify_dropout=False, load_last_ckpt: bool=False):
+    def _load_model(self, model_module: ModelModule, train_dataset: TimeSeriesDataSet, model_id='', modify_dropout=False, load_last_ckpt: bool=False):
         model_id = model_id if model_id != '' else self.model_id
         if not modify_dropout:
             try:
-                self.model_module.load_model_from_checkpoint(model_id, self.accelerator, load_last_ckpt=load_last_ckpt)
+                model_module.load_model_from_checkpoint(model_id, self.accelerator, load_last_ckpt=load_last_ckpt)
             except:
-                dataset = self.training_data_module.training_dataset
- 
-                if (not isinstance(dataset, TimeSeriesDataSet)):
-                    raise Exception('something went wrong...')
-                else:
-                    self.model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
-                                                                          dataset, self.learning_rate,
-                                                                          self.hidden_size, self.attention_head_size,
-                                                                          self.dropout, self.hidden_continuous_size,
-                                                                          self.lstm_layers, self.reduce_on_plateau_patience,
-                                                                          load_last_ckpt=load_last_ckpt)
+                model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator,
+                                                                  train_dataset, self.learning_rate,
+                                                                  self.hidden_size, self.attention_head_size,
+                                                                  self.dropout, self.hidden_continuous_size,
+                                                                  self.lstm_layers, self.reduce_on_plateau_patience,
+                                                                  load_last_ckpt=load_last_ckpt)
         else:
-            dataset = self.training_data_module.training_dataset
- 
-            if (not isinstance(dataset, TimeSeriesDataSet)):
-                raise Exception('something went wrong...')
-            else:
-                self.model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
-                                                                      dataset, self.learning_rate,
-                                                                      self.hidden_size, self.attention_head_size,
-                                                                      self.dropout, self.hidden_continuous_size,
-                                                                      self.lstm_layers, self.reduce_on_plateau_patience,
-                                                                      load_last_ckpt=load_last_ckpt)
+            model_module.load_model_from_checkpoint_and_data(model_id, self.accelerator, 
+                                                              train_dataset, self.learning_rate,
+                                                              self.hidden_size, self.attention_head_size,
+                                                              self.dropout, self.hidden_continuous_size,
+                                                              self.lstm_layers, self.reduce_on_plateau_patience,
+                                                              load_last_ckpt=load_last_ckpt)
 
 
 def parse_args():
@@ -483,15 +374,10 @@ def parse_args():
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=0)
-    parser.add_argument('--explain_model', type=bool, default=0)
 
-    parser.add_argument('--run_inference', type=bool, default=0)
     parser.add_argument('--execute_buy', type=bool, default=1)
-    parser.add_argument('--find_optimal_hyperparams', type=bool, default=0)
-    parser.add_argument('--find_optimal_learning_rate', type=bool, default=0)
-    parser.add_argument('--plot_prediction', type=bool, default=0)
 
-    # run_trainer uploads the checkpoints early but its helpful for when you stop training early you can run checkpoint upload early.
+    # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
 
     return parser.parse_args()
@@ -520,18 +406,8 @@ def main():
         orc.run_batch_inference(save_predictions=True, load_last_ckpt=True)
     if args.run_evaluation:
         orc.run_evaluation()
-    if args.explain_model:
-        orc.explain_model()
-    if args.run_inference:
-        orc.run_inference()
     if args.execute_buy:
         orc.execute_buy(True)
-    if args.find_optimal_hyperparams:
-        orc.find_optimal_hyperparams()
-    if args.find_optimal_learning_rate:
-        orc.find_optimal_learning_rate()
-    if args.plot_prediction:
-        orc.plot_predictions()
     if args.run_checkpoint_upload:
         orc.run_checkpoint_upload()
 
