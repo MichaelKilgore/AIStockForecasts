@@ -151,11 +151,15 @@ class Orchestration:
         train_dataset, val_dataset = training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
         train_dataloader, val_dataloader = training_data_module.construct_train_and_validation_dataloaders(train_dataset, val_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
-        # TODO: For whatever reason when you break up the data into multiple dataloaders, predictions can be slightly different, not sure why though.
-        if self.is_large:
-            test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end, 10, self.max_prediction_length)
-        else:
-            test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end)
+        '''
+        TODO: For whatever reason when you break up the data into multiple dataloaders, predictions can be slightly different, not sure why though.
+        # if self.is_large:
+        #     test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end, 10, self.max_prediction_length)
+        # else:
+
+        Also I recently upgraded my systems total ram to 64gb so skipping breaking up the datasets unless I find I need to again in the future.
+        '''
+        test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end)
 
         test_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
 
@@ -353,8 +357,8 @@ def parse_args():
     parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
-    parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=1)
+    parser.add_argument('--run_batch_inference', type=bool, default=1)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
 
     parser.add_argument('--execute_buy', type=bool, default=0)
 
@@ -397,3 +401,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+

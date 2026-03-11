@@ -189,7 +189,7 @@ class ModelModule:
 
         trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
 
-        self.predictions = None
+        predictions = None
         for dl in dataloaders:
             pred = self.model.predict(
                 dl,
@@ -200,40 +200,39 @@ class ModelModule:
                 trainer_kwargs=trainer_kwargs
             )
 
-            if self.predictions:
-                self.predictions = self._append_predictions_chunk(pred)
+            if predictions:
+                predictions = self._append_predictions_chunk(predictions, pred)
             else:
-                self.predictions = pred
+                predictions = pred
 
         # TODO: for large models with many symbols and large prediction windows s3 doesn't allow you to save files larger than 5gb so we would need to break this up but for now just gonna skip saving it cause I don't really use the raw predictions for anything currently anyways.
         if save_predictions and not is_large:
-            self.s3_util.save_raw_predictions(model_id, self.predictions)
-        self.predictionsDF = self.convert_raw_predictions_to_simpler_format(df)
+            self.s3_util.save_raw_predictions(model_id, predictions)
+        predictionsDF = self.convert_raw_predictions_to_simpler_format(predictions, df)
         if save_predictions:
-            self.s3_util.save_human_readable_predictions(model_id, self.predictionsDF)
+            self.s3_util.save_human_readable_predictions(model_id, predictionsDF)
 
 
-    def _append_predictions_chunk(self, p: Prediction):
+    def _append_predictions_chunk(self, predictions, p: Prediction):
         x_combined = {
-            k: torch.cat([self.predictions.x[k], p.x[k]], dim=0)
-            for k in self.predictions.x
+            k: torch.cat([predictions.x[k], p.x[k]], dim=0)
+            for k in predictions.x
         }
 
         y_combined = tuple(
-            torch.cat([self.predictions.y[i], p.y[i]], dim=0)
-            if self.predictions.y[i] is not None
+            torch.cat([predictions.y[i], p.y[i]], dim=0)
+            if predictions.y[i] is not None
             else None
-            for i in range(len(self.predictions.y))
+            for i in range(len(predictions.y))
         )
 
         return Prediction(
-            output=torch.cat([self.predictions.output, p.output], dim=0),
+            output=torch.cat([predictions.output, p.output], dim=0),
 
             x=x_combined,
 
-            index=pd.concat([self.predictions.index, p.index], ignore_index=True),
+            index=pd.concat([predictions.index, p.index], ignore_index=True),
 
-            # decoder_lengths=torch.cat([self.predictions.decoder_lengths, p.decoder_lengths], dim=0),
             decoder_lengths=None,
 
             y=y_combined
@@ -244,7 +243,7 @@ class ModelModule:
             raise Exception('must load in model before loading predictions')
 
         trainer_kwargs = { "accelerator": "gpu", "devices": 1 }
-        self.predictions = self.model.predict(
+        predictions = self.model.predict(
             dataloader,
             mode=self.mode,
             return_x=True,
@@ -252,30 +251,30 @@ class ModelModule:
             return_index=True,
             trainer_kwargs=trainer_kwargs,
         )
-        return self.convert_raw_predictions_to_simpler_format(df, True)
+        return self.convert_raw_predictions_to_simpler_format(predictions, df, True)
 
 
     def load_raw_predictions(self, model_id: str, df: DataFrame):
-        self.predictions = self.s3_util.load_raw_predictions(model_id)
-        self.convert_raw_predictions_to_simpler_format(df)
+        predictions = self.s3_util.load_raw_predictions(model_id)
+        self.convert_raw_predictions_to_simpler_format(predictions, df)
 
     def load_human_readable_predictions(self, model_id: str) -> DataFrame:
         return self.s3_util.load_human_readable_predictions(model_id)
 
-    def convert_raw_predictions_to_simpler_format(self, df: DataFrame, is_single_day_inference: bool=False) -> DataFrame:
-        timestamps = self._get_timestamps(df)
+    def convert_raw_predictions_to_simpler_format(self, predictions, df: DataFrame, is_single_day_inference: bool=False) -> DataFrame:
+        timestamps = self._get_timestamps(predictions, df)
 
-        y_pred = self.predictions.output
+        y_pred =predictions.output
 
-        y_true = self.predictions.y[0]
-        symbols = self.predictions.index['symbol']
+        y_true = predictions.y[0]
+        symbols = predictions.index['symbol']
         # y_pred shape: (239, 14, 3)
         # y shape: (239, 14)
         # symbols: (239, 1)
         # timestamps: (239, 14)
 
         # pulls the y at timestamp you are predicting from
-        # enc_tgt = torch.roll(self.predictions.y[0], shifts=-1, dims=0)
+        # enc_tgt = torch.roll(predictions.y[0], shifts=-1, dims=0)
 
         y_true_np = y_true.cpu().numpy()
         y_pred_np = y_pred.cpu().numpy()
@@ -310,7 +309,7 @@ class ModelModule:
                 predictionsDF["current_y"].notna()
             ]
         else:
-            predictionsDF["current_y"] = self.predictions.x["encoder_target"][:, -1].cpu().numpy()
+            predictionsDF["current_y"] = predictions.x["encoder_target"][:, -1].cpu().numpy()
 
         return predictionsDF
 
@@ -319,8 +318,8 @@ class ModelModule:
         # time_idx, timestamp, symbol, feature_a, feature_b, ...
         return predictionsDF.merge(df, on=['symbol', 'timestamp'], how='inner')
 
-    def plot_mape_by_symbol(self):
-        self.mapeResultDF = self.predictionsDF.copy()
+    def plot_mape_by_symbol(self, predictionsDF):
+        self.mapeResultDF = predictionsDF.copy()
         self.mapeResultDF['mape'] = ((self.mapeResultDF['y'] - self.mapeResultDF['y_pred_p50']).abs() / self.mapeResultDF['y']) * 100
         self.mapeResultDF = self.mapeResultDF.assign( mape_first=self.mapeResultDF["mape"].apply(lambda x: float(np.asarray(x).ravel()[0])) )
         self.mapeResultDF = self.mapeResultDF.groupby(['symbol']).mean()
@@ -333,27 +332,6 @@ class ModelModule:
     def upload_checkpoints_to_s3(self, model_id: str):
         self.s3_util.upload_checkpoints(self.ckpt_dir, self.model_dir, model_id)
 
-    def quick_set_predictions_df(self, pred_file: str="src/ai_stock_forecasts/orchestration/val_predictions_series_level.csv"):
-        pd.set_option('display.max_columns', None)
-        pd.set_option('display.width', 2000)
-        pd.set_option('display.max_colwidth', None)
-        self.predictionsDF = pd.read_csv(pred_file)
-
-        def parse_series_string(x):
-            if not isinstance(x, str):
-                return x
-            try:
-                # Try standard JSON parsing first (compatible with the .tolist() fix)
-                return json.loads(x.replace("'", '"'))
-            except json.JSONDecodeError:
-                # Fallback: Parse numpy's space-separated string format
-                # Remove brackets and split by whitespace (handles newlines automatically)
-                cleaned = x.replace('[', '').replace(']', '').strip()
-                return [float(i) for i in cleaned.split()] if cleaned else []
-
-        for col in ["y", "y_pred_p30", "y_pred_p50", "y_pred_p70"]:
-            if col in self.predictionsDF.columns and self.predictionsDF[col].dtype == "object":
-                self.predictionsDF[col] = self.predictionsDF[col].apply(parse_series_string)
 
     def find_optimal_hyperparameters(self, train_dataloader: DataLoader, val_dataloader: DataLoader):
         torch.serialization.add_safe_globals([EncoderNormalizer])
@@ -414,8 +392,8 @@ class ModelModule:
         fig.savefig("prediction.png", dpi=200, bbox_inches="tight")
         # fig.show()
 
-    def _get_timestamps(self, df) -> np.ndarray:
-        decoder_time_idx = self.predictions.x["decoder_time_idx"].detach().cpu().numpy()
+    def _get_timestamps(self, predictions, df) -> np.ndarray:
+        decoder_time_idx = predictions.x["decoder_time_idx"].detach().cpu().numpy()
 
         ts_lookup = (
             df[["time_idx", "timestamp"]]
