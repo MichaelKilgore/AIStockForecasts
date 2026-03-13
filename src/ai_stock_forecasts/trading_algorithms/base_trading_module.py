@@ -1,9 +1,14 @@
 
 from abc import abstractmethod
+from typing import Optional
 
 from pandas import DataFrame
 import numpy as np
+import pandas as pd
 from scipy.stats import norm
+from datetime import datetime
+
+from ai_stock_forecasts.models.day_of_week import DayOfWeek
 
 
 class BaseTradingModule:
@@ -14,7 +19,7 @@ class BaseTradingModule:
         pass
 
     @abstractmethod
-    def generate_buy_list(self, predictions: DataFrame, prediction_raw_num: bool=False) -> DataFrame:
+    def generate_buy_list(self, predictions: DataFrame) -> DataFrame:
         pass
 
     """ assumes we can generate 5% returns annually risk free.
@@ -34,4 +39,18 @@ class BaseTradingModule:
 
         return sharpe_annual, p_two_sided
 
+    '''
+        assumes timestamps is sorted in ascending order
+    '''
+    def _get_next_timestamp(self, timestamps: pd.Series, day_of_week: DayOfWeek, current_ts: np.datetime64) -> Optional[np.datetime64]:
+        i = timestamps[timestamps == current_ts].index[0]
+        j = 1
+
+        while True:
+            if i + j >= len(timestamps):
+                return None
+            if timestamps[(i + j)].day_name() == day_of_week.value:
+                return timestamps[i + j]
+                break
+            j += 1
 

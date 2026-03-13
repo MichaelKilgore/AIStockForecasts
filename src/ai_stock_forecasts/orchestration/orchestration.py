@@ -8,6 +8,8 @@ import torch
 import yaml
 import os
 from ai_stock_forecasts.losses.weighted_quantile_loss import WeightedQuantileLoss
+from ai_stock_forecasts.models.day_of_week import DayOfWeek
+from ai_stock_forecasts.trading_algorithms.volatility_ranking import VolatilityRanking
 from ai_stock_forecasts.utils.date_util import get_prev_market_open_day
 from ai_stock_forecasts.utils.dynamodb_util import DynamoDBUtil
 from ai_stock_forecasts.data.inference_data_module import InferenceDataModule
@@ -205,23 +207,11 @@ class Orchestration:
             filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
 
 
-        trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, compound_money=False, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200)
+        # trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, compound_money=False, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
+        trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.tuesday, volatility_importance=0.05)
 
+        trading_algorithm.simulate(predictionsDF)
 
-        # Tuesday
-        trading_algorithm.simulate(predictionsDF, self.target in ['close', 'high', 'low', 'open'], filtered_df, 'Tuesday')
-
-        # model_module.plot_mape_by_symbol()
-
-        # results = []
-        # for i in list([1,2]):
-        #     for j in list([10,25,50]):
-        #         for k in list([0.1, 0.2, 0.3, 0.4, 0.5]):
-        #             self.trading_algorithm = SimpleXDaysAheadBuying(interval_days=i, num_stocks_purchased=j, capital_gains_tax=0.35, uncertainty_multiplier=k, dont_buy_negative_stocks=True)
-
-        #             results.append(([i,j,k], self.trading_algorithm.simulate(self.model_module.predictionsDF)))
-        #             print(results[-1])
-        # print(results)
 
     ''' Setting testing to true does not gate any logic. All it does is move the day we run inference for back 
         till we reach a day the stock market was actually open. It thing skips any logic preventing trading earlier than intended.
@@ -303,7 +293,7 @@ class Orchestration:
     def _init_trading_strategy(self) -> BaseTradingModule:
         strat = self.config['preferred_trading_strategy']
 
-        performance_test = self.config[strat]['_test_strategy'] 
+        performance_test = self.config[strat]['_test_strategy']
 
         self.interval_days = self.config[strat]['_interval_days']
 
@@ -357,8 +347,8 @@ def parse_args():
     parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
-    parser.add_argument('--run_batch_inference', type=bool, default=1)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_batch_inference', type=bool, default=0)
+    parser.add_argument('--run_evaluation', type=bool, default=1)
 
     parser.add_argument('--execute_buy', type=bool, default=0)
 
