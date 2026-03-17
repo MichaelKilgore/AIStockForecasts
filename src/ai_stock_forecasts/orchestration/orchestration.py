@@ -209,7 +209,7 @@ class Orchestration:
             filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
 
 
-        trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, compound_money=False, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
+        trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, uncertainty_multiplier=0.000, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
         # trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.wednesday, volatility_importance=0.4)
 
         trading_algorithm.simulate(predictionsDF)

@@ -13,22 +13,18 @@ Simulates purchasing x stocks every y days over the entire predictions df passed
 """
 class SimpleXDaysAheadBuying(BaseTradingModule): 
     def __init__(self, interval_days: int=1, num_stocks_purchased: int=10,
-                 capital_gains_tax: float=0.35, compound_money:bool=True,
-                 dont_buy_negative_stocks:bool=True, uncertainty_multiplier:float=0.4,
-                 filter_out_x_most_volatile: int=0, predicting_raw_num: bool=False, pivot_df: Optional[DataFrame] = None, day_of_week: DayOfWeek = Optional[DayOfWeek.tuesday]):
+                 uncertainty_multiplier:float=0.4, filter_out_x_most_volatile: int=0,
+                 predicting_raw_num: bool=False, pivot_df: Optional[DataFrame] = None, day_of_week: DayOfWeek = Optional[DayOfWeek.tuesday]):
         super().__init__()
 
         self.interval_days: int = interval_days
         self.num_stocks_purchased: int = num_stocks_purchased
-        self.capital_gains_tax: float = capital_gains_tax
-        self.compound_money: bool = compound_money
-        self.dont_buy_negative_stocks: bool = dont_buy_negative_stocks
         self.uncertainty_multiplier: float = uncertainty_multiplier
         self.filter_out_x_most_volatile=filter_out_x_most_volatile
         self.predicting_raw_num = predicting_raw_num
         self.pivot_df = pivot_df
         self.day_of_week = day_of_week
-        print(f"set trading params to: interval_days: {self.interval_days}, num_stocks_purchased: {self.num_stocks_purchased}, capital_gains_tax: {self.capital_gains_tax}, compound_money: {self.compound_money}, dont_buy_negative_stocks: {self.dont_buy_negative_stocks}, uncertainty_multiplier: {self.uncertainty_multiplier}, filter_out_x_most_volatile: {self.filter_out_x_most_volatile}")
+        print(f"set trading params to: interval_days: {self.interval_days}, num_stocks_purchased: {self.num_stocks_purchased}, uncertainty_multiplier: {self.uncertainty_multiplier}, filter_out_x_most_volatile: {self.filter_out_x_most_volatile}")
 
 
     """
@@ -52,130 +48,11 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
         so we don't need to do any check we can just sort by the p50.
 
     """
-    def simulate(self, predictions: DataFrame) -> tuple:
+    def simulate(self, predictions: DataFrame) -> tuple[float, float, float]:
         if self.filter_out_x_most_volatile != 0:
             predictions = self._filter_out_x_most_volatile(predictions)
 
-        h = defaultdict(int)
-
-        period_returns = []
-        total_money = []
-        money_made_per_day = DefaultDict(int)
-        money = self.starting_money
-        timestamps = (
-            pd.Series(predictions["timestamp"])
-            .drop_duplicates()
-            .sort_values()
-            .reset_index(drop=True)
-        )
-
-        current_ts = timestamps.min()
-        i = timestamps[timestamps == current_ts].index[0]
-        j = 1
-        if self.day_of_week:
-            while True:
-                if self.day_of_week and timestamps[(i + j)].day_name() == self.day_of_week.value:
-                    current_ts = timestamps[i + j]
-                    break
-                j += 1
-
-        while True:
-            mask = predictions["timestamp"] == current_ts
-            filtered = predictions.loc[mask].copy()
-
-            top_x = self._determine_top_x(filtered)
-
-            next_ts = None
-            if self.day_of_week:
-                i = timestamps[timestamps == current_ts].index[0]
-                j = 1
-                while True:
-                    if i + j >= len(timestamps):
-                        break
-                    elif self.day_of_week and timestamps[(i + j)].day_name() == self.day_of_week.value:
-                        next_ts = timestamps[i + j]
-                        break
-                    j += 1
-                if i + j >= len(timestamps):
-                    break
-
-            total_profit = 0
-            if len(top_x) > 0 and self.predicting_raw_num:
-                for row, curr_price in zip(top_x["y"], top_x["current_y"]):
-                    money_to_invest = money if self.compound_money else self.starting_money
-                    money_invested_in_this_stock = (money_to_invest / len(top_x))
-                    num_stocks_bought = ( money_invested_in_this_stock / curr_price )
-                    stock_value_now = row[self.interval_days-1]
-                    money_post_sell = (num_stocks_bought * stock_value_now)
-                    total_profit += money_post_sell - (money_to_invest / len(top_x))
-            elif len(top_x) > 0:
-                i = timestamps[timestamps == current_ts].index[0]
-                if i + self.interval_days >= len(timestamps):
-                    break
-                # future_ts = timestamps[i + self.interval_days]
-                future_ts = self._get_next_timestamp(timestamps, current_ts)
-                future_mask = predictions["timestamp"] == future_ts
-
-                future_price = predictions.loc[future_mask].copy()
-                future_price['future_price'] = future_price['close']
-
-                top_x['curr_price'] = top_x['close']
-                top_x = top_x[['symbol', 'curr_price']].merge(
-                        future_price[['symbol', 'future_price']],
-                        on=['symbol'], how='inner')
-
-                for symbol, curr_price, future_price in zip(top_x['symbol'], top_x['curr_price'], top_x['future_price']):
-                    if future_price / 4 > curr_price:
-                        print(f'reverse split likely, skipping symbol: {symbol}, ts: {current_ts}, that had curr_price: {curr_price}, and future_price: {future_price}')
-                        continue
-
-                    h[symbol] += 1
-                    money_to_invest = money if self.compound_money else self.starting_money
-                    money_invested_in_this_stock = (money_to_invest / len(top_x))
-                    num_stocks_bought = ( money_invested_in_this_stock / curr_price )
-                    stock_value_now = future_price
-                    money_post_sell = (num_stocks_bought * stock_value_now)
-                    total_profit += money_post_sell - (money_to_invest / len(top_x))
-
-            period_returns.append(total_profit / money)
-            total_money.append(money)
-            # print(f"Total Profit (investing $500 per stock): {total_profit}")
-            money += total_profit
-            # Wednesday
-            money_made_per_day[current_ts.day_name()] += total_profit
-
-            # go to 7 days later
-            if self.day_of_week == '':
-                i = timestamps[timestamps == current_ts].index[0]
-                if i + self.interval_days >= len(timestamps):
-                    break
-                current_ts = timestamps[i + self.interval_days]
-            else:
-                current_ts = next_ts
-
-
-        # print(f"Total money made over 2024: {money - 25000}")
-        absolute_difference = money - self.starting_money
-        money_left_post_tax = money - (absolute_difference*self.capital_gains_tax)
-        difference = ((money_left_post_tax - self.starting_money) / self.starting_money) * 100
-
-        print(f'symbols bought:')
-
-        arr = []
-        for s, count in h.items():
-            arr.append( (s,count) )
-        arr.sort(key=lambda x: x[1])
-
-        for val in arr:
-            print(f'symbol: {val[0]}, num_times_purchased: {val[1]}')
-
-        print(f"money left post tax: {money_left_post_tax}")
-        print(f"money made per day: {money_made_per_day}")
-
-        sharpe, p_value = self._calculate_sharpe_ratio_and_p_value(period_returns)
-        print(f"annual sharpe is: {sharpe}")
-
-        return difference, sharpe, p_value
+        return super().simulate(predictions)
 
     """
         We expect predictions in this format (there will only be one timestamp though):
@@ -221,8 +98,8 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             predictions.loc[:, "score"] = score
 
             top_x = predictions.sort_values("score", ascending=False).head(self.num_stocks_purchased)
-            if (self.dont_buy_negative_stocks):
-                top_x = top_x[top_x["score"] > 0.0]
+
+            top_x = top_x[top_x["score"] > 0.0]
 
             return top_x
         else:
@@ -238,8 +115,8 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             predictions.loc[:, "score"] = score
 
             top_x = predictions.sort_values("score", ascending=False).head(self.num_stocks_purchased)
-            if (self.dont_buy_negative_stocks):
-                top_x = top_x[top_x["score"] > 0.0]
+
+            top_x = top_x[top_x["score"] > 0.0]
 
             return top_x
 
