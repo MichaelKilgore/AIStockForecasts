@@ -11,6 +11,7 @@ import os
 import base64
 import json
 import requests
+import logging
 
 import math
 
@@ -35,13 +36,13 @@ class OrderUtil:
                 time_in_force=TimeInForce.DAY
             )
 
-            print(f'placing order on symbol: {order_item.symbol}, qty: {order_item.quantity}, side: {order_item.order_type}')
+            logging.info(f'placing order on symbol: {order_item.symbol}, qty: {order_item.quantity}, side: {order_item.order_type}')
             _ = self.trading_client.submit_order(
                 order_data=market_order_data
             )
 
     def close_all_positions(self):
-        print('closing all positions')
+        logging.info('closing all positions...')
         self.trading_client.close_all_positions(cancel_orders=True)
 
     def is_stock_market_open(self):
@@ -54,7 +55,7 @@ class OrderUtil:
 
         response = requests.get(url, headers=headers)
 
-        print(response.text)
+        logging.info(response.text)
         obj = json.loads(response.text)
 
         return obj['is_open'] == 'true'

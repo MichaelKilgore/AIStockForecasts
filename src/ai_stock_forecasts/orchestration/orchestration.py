@@ -283,14 +283,14 @@ class Orchestration:
         self.order_util.place_order(order)
 
     def run_checkpoint_upload(self):
-        print("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
+        logging.info("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
         ans = input()
         if ans == "y":
             model_module = ModelModule(self.loss)
 
             model_module.upload_checkpoints_to_s3(self.model_id)
         else:
-            print('skipping checkpoint upload...')
+            logging.info('skipping checkpoint upload...')
 
     def _init_trading_strategy(self) -> BaseTradingModule:
         strat = self.config['preferred_trading_strategy']

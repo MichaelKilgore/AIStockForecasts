@@ -18,6 +18,8 @@ import cloudpickle
 from ai_stock_forecasts.models.historical_data import HistoricalData
 from lightning_utilities.core.rank_zero import rank_zero_only
 
+import logging
+
 class S3ParquetUtil:
     def __init__(self):
         load_dotenv()
@@ -50,7 +52,7 @@ class S3ParquetUtil:
     def get_features_data(self, symbols: list[str], features: list[str], time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day)) -> pd.DataFrame:
         dfs = []
         for feature in features:
-            print(f"pulling feature data for feature: {feature}, time_frame: {time_frame.unit_value.value}, prefix: {self.prefix}")
+            logging.info(f"pulling feature data for feature: {feature}, time_frame: {time_frame.unit_value.value}, prefix: {self.prefix}")
             if time_frame.amount_value == 1:
                 prefix = f"{self.prefix}/feature={feature}/time_frame={time_frame.unit_value.value}/"
             else:
@@ -76,7 +78,7 @@ class S3ParquetUtil:
                     if not key.endswith(".parquet"):
                         continue
 
-                    print(f"s3 get_object: {key}")
+                    logging.info(f"s3 get_object: {key}")
                     obj_resp = self.s3.get_object(Bucket=self.bucket, Key=key)
                     data = obj_resp["Body"].read()
 
@@ -133,7 +135,7 @@ class S3ParquetUtil:
             Body=buffer.getvalue(),
         )
 
-        print(f"Uploaded {len(df)} rows to s3://{self.bucket}/{key}")
+        logging.info(f"Uploaded {len(df)} rows to s3://{self.bucket}/{key}")
 
     def _to_row(self, rec: HistoricalData) -> dict:
         return {
@@ -150,7 +152,7 @@ class S3ParquetUtil:
     @rank_zero_only
     def save_raw_predictions(self, model_id: str, predictions: Prediction):
         key = 'model_predictions/'+model_id+'.pkl'
-        print(f'saving raw predictions for model_id: {model_id} to {key}')
+        logging.info(f'saving raw predictions for model_id: {model_id} to {key}')
         buf = io.BytesIO()
         cloudpickle.dump(predictions, buf, protocol=pickle.HIGHEST_PROTOCOL)
         buf.seek(0)
@@ -160,7 +162,7 @@ class S3ParquetUtil:
     @rank_zero_only
     def save_human_readable_predictions(self, model_id: str, predictions: pd.DataFrame):
         key = 'model_predictions_readable/'+model_id+'.pkl'
-        print(f'saving human readable predictions for model_id: {model_id} to {key}')
+        logging.info(f'saving human readable predictions for model_id: {model_id} to {key}')
  
         buf = io.BytesIO()
         pickle.dump(predictions, buf, protocol=pickle.HIGHEST_PROTOCOL)
@@ -170,7 +172,7 @@ class S3ParquetUtil:
 
     def load_raw_predictions(self, model_id: str) -> pd.DataFrame:
         key = 'model_predictions/'+model_id+'.pkl'
-        print(f'loading raw predictions for model_id: {model_id} from {key}')
+        logging.info(f'loading raw predictions for model_id: {model_id} from {key}')
 
         obj = self.s3.get_object(Bucket=self.bucket, Key=key)
         data = obj['Body'].read()
@@ -178,7 +180,7 @@ class S3ParquetUtil:
 
     def load_human_readable_predictions(self, model_id: str) -> pd.DataFrame:
         key = 'model_predictions_readable/'+model_id+'.pkl'
-        print(f'loading human readable predictions for model_id: {model_id} from {key}')
+        logging.info(f'loading human readable predictions for model_id: {model_id} from {key}')
 
         obj = self.s3.get_object(Bucket=self.bucket, Key=key)
         data = obj["Body"].read()
@@ -187,7 +189,7 @@ class S3ParquetUtil:
     @contextmanager
     def load_best_model_checkpoint(self, model_id: str, pull_last_ckpt: bool=False):
         key = model_id + '/output/model.tar.gz'
-        print(f'loading model ckpt for model_id: {model_id} from {key}, with pull_last_ckpt: {pull_last_ckpt}.')
+        logging.info(f'loading model ckpt for model_id: {model_id} from {key}, with pull_last_ckpt: {pull_last_ckpt}.')
 
         obj = self.s3.get_object(Bucket=self.model_output_bucket, Key=key)
         buf = io.BytesIO(obj["Body"].read())
@@ -218,7 +220,7 @@ class S3ParquetUtil:
 
                 ckpts.sort(key=score)
                 member = ckpts[0]
-                print(f'pulling this ckpt: {member.name}')
+                logging.info(f'pulling this ckpt: {member.name}')
 
                 tf.extract(member, path=tmp)
                 ckpt_path = os.path.join(tmp, member.name)
@@ -229,7 +231,7 @@ class S3ParquetUtil:
         checkpoints = Path(checkpoints_path)
         key = f'{model_id}/output/model.tar.gz'
 
-        print(f'uploading checkpoints path {checkpoints} to {key}')
+        logging.info(f'uploading checkpoints path {checkpoints} to {key}')
 
         with tarfile.open(f'{out_path}/model.tar.gz', mode="w:gz") as tf:
             tf.add(checkpoints, arcname=checkpoints.name)

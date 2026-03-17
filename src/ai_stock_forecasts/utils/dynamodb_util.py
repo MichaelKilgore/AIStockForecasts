@@ -15,6 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from boto3.dynamodb.conditions import Key
+import logging
 
 class DynamoDBUtil:
     def __init__(self):
@@ -56,7 +57,7 @@ class DynamoDBUtil:
             ]
     """
     def upload_order(self, order: Order):
-        print(f'uploading order to dynamodb for model_id: {order.model_id}, order_timestamp: {order.order_timestamp}')
+        logging.info(f'uploading order to dynamodb for model_id: {order.model_id}, order_timestamp: {order.order_timestamp}')
         self.order_table.put_item(
             Item={
                 'model_id': order.model_id,

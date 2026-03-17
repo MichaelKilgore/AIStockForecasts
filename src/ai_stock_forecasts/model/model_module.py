@@ -21,7 +21,7 @@ from pandas import DataFrame
 
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 from lightning_utilities.core.rank_zero import rank_zero_only
-
+import logging
 
 
 if torch.cuda.is_available():
@@ -125,7 +125,7 @@ class ModelModule:
                 reduce_on_plateau_patience=reduce_on_plateau_patience,
             )
         else:
-            print('model is already loaded in, running fine tuning')
+            logging.info('model is already loaded in, running fine tuning')
 
         self.trainer = Trainer(
             max_epochs=max_epochs,
@@ -352,10 +352,10 @@ class ModelModule:
             use_learning_rate_finder=True,
         )
 
-        print("Best trial value:", study.best_trial.value)
-        print("Best parameters:")
+        logging.info("Best trial value:", study.best_trial.value)
+        logging.info("Best parameters:")
         for k, v in study.best_trial.params.items():
-            print(f"  {k}: {v}")
+            logging.info(f"  {k}: {v}")
 
     def find_optimal_learning_rate(self, train_dataloader: DataLoader, val_dataloader: DataLoader,
                                    max_epochs: int, accelerator: str, devices: int):
@@ -375,7 +375,7 @@ class ModelModule:
             min_lr=1e-6,
         )
 
-        print(f"suggested learning rate: {res.suggestion()}")
+        logging.info(f"suggested learning rate: {res.suggestion()}")
         fig = res.plot(show=True, suggest=True)
         fig.show()
 

@@ -20,6 +20,7 @@ import yfinance as yf
 import time
 
 from ai_stock_forecasts.utils.yfinance_util import YfinanceUtil
+import logging
 
 class GetHistoricalDataUtil:
     def __init__(self):
@@ -28,8 +29,8 @@ class GetHistoricalDataUtil:
         self._alpaca_key = os.getenv("ALPACA_KEY")
         self._alpaca_secret = os.getenv("ALPACA_SECRET")
 
-        print("Alpaca Key:", self._alpaca_key)
-        print("Alpaca Secret:", self._alpaca_secret)
+        logging.info("Alpaca Key:", self._alpaca_key)
+        logging.info("Alpaca Secret:", self._alpaca_secret)
 
         self.stock_client = StockHistoricalDataClient(self._alpaca_key, self._alpaca_secret)
 
@@ -50,16 +51,16 @@ class GetHistoricalDataUtil:
         if time_frame.unit != TimeFrameUnit.Day or time_frame.amount != 1:
             raise Exception('removed support for more finer grain units since data is definitely not clean in alpaca. We switched to yfinance as data source. Need to do more research to see if yfinance supports finer grains than daily')
 
-        print(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
+        logging.info(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
         res = []
         for i, stock in enumerate(stocks):
-            print(f'pulling {i}, {stock}...')
+            logging.info(f'pulling {i}, {stock}...')
             while(True):
                 try:
                     df = self.yfinance_util.get_historical_data(stock, start, end)
                     df.reset_index(drop=False)
                 except:
-                    print('being rate limited waiting 10 seconds to try again')
+                    logging.info('being rate limited waiting 10 seconds to try again')
                     time.sleep(10)
                 break
 
@@ -73,7 +74,7 @@ class GetHistoricalDataUtil:
         if time_frame.unit != TimeFrameUnit.Day or time_frame.amount != 1:
             raise Exception('removed support for more finer grain units since data is definitely not clean in alpaca. We switched to yfinance as data source. Need to do more research to see if yfinance supports finer grains than daily')
 
-        print(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
+        logging.info(f'Getting stock price history for {len(stocks)} symbols between {start} and {end}, with time_frame: {time_frame}')
 
         df = yf.download(
             tickers=stocks,

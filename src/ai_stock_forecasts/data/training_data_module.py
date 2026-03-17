@@ -14,6 +14,7 @@ import pandas as pd
 import time
 import torch
 import numpy as np
+import logging
 
 
 """
@@ -50,7 +51,7 @@ class TrainingDataModule(DataModule):
             if not self.df.empty:
                 return
             try:
-                print(f'attempting to pull cached df from {self.cache_path}')
+                logging.info(f'attempting to pull cached df from {self.cache_path}')
                 self.df = pd.read_parquet(self.cache_path)
             except:
                 time.sleep(10)
@@ -110,8 +111,8 @@ class TrainingDataModule(DataModule):
         train_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= train_end)
         train_df = self.df.loc[train_mask].copy()
 
-        print(f'setting target to: {self.target}')
-        print(f'setting target_normalizer to: {self.target_normalizer}')
+        logging.info(f'setting target to: {self.target}')
+        logging.info(f'setting target_normalizer to: {self.target_normalizer}')
         training_dataset = TimeSeriesDataSet(
             train_df,
             time_idx="time_idx",
@@ -205,7 +206,7 @@ class TrainingDataModule(DataModule):
 
     @rank_zero_only
     def cache_df(self):
-        print(f'caching dataset at: {self.cache_path}')
+        logging.info(f'caching dataset at: {self.cache_path}')
         self.df.to_parquet(self.cache_path, index=False)
 
 

@@ -5,6 +5,7 @@ from ai_stock_forecasts.models.day_of_week import DayOfWeek
 from ai_stock_forecasts.trading_algorithms.base_trading_module import BaseTradingModule
 import pandas as pd
 import numpy as np
+import logging
 
 
 class VolatilityRanking(BaseTradingModule):
@@ -15,7 +16,7 @@ class VolatilityRanking(BaseTradingModule):
         self.num_stocks_purchased = num_stocks_purchased
         self.day_of_week = day_of_week
         self.volatility_importance = volatility_importance
-        print(f'set trading params to: num_stocks_purchased: {self.num_stocks_purchased}, day_of_week: {self.day_of_week}, volatility_importance: {self.volatility_importance}')
+        logging.info(f'set trading params to: num_stocks_purchased: {self.num_stocks_purchased}, day_of_week: {self.day_of_week}, volatility_importance: {self.volatility_importance}')
 
 
     def generate_buy_list(self, predictions: pd.DataFrame) -> pd.DataFrame:
