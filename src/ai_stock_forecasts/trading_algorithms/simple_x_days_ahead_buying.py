@@ -32,6 +32,8 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
 
 
     """
+        TODO: Need to make use of base trading module simulate
+
         We expect predictions in this format:
 
             "symbol": [ AAPL, AMD, ... ],

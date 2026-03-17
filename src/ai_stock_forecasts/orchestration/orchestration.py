@@ -29,6 +29,8 @@ from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 import pandas as pd
 import math
 
+import logging
+
 class Orchestration:
     def __init__(self, symbols: list[str], model_id: str, config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -208,7 +210,7 @@ class Orchestration:
 
 
         # trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, capital_gains_tax=0.35, uncertainty_multiplier=0.000, compound_money=False, dont_buy_negative_stocks=True, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
-        trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.tuesday, volatility_importance=0.05)
+        trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.wednesday, volatility_importance=0.4)
 
         trading_algorithm.simulate(predictionsDF)
 
@@ -344,7 +346,7 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance-and-more-complex')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
@@ -359,6 +361,15 @@ def parse_args():
 
 
 def main():
+
+    logging.addLevelName(19, 'INFO_VERBOSE')
+
+    logging.basicConfig(
+        level=logging.INFO,
+        # level='INFO_VERBOSE',
+        format="%(levelname)s - %(message)s"
+    )
+
     args = parse_args()
 
     with open('/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
@@ -391,6 +402,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
 
