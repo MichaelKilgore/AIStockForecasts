@@ -113,7 +113,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
                 if i + self.interval_days >= len(timestamps):
                     break
                 # future_ts = timestamps[i + self.interval_days]
-                future_ts = self._get_next_timestamp(timestamps, self.day_of_week, current_ts)
+                future_ts = self._get_next_timestamp(timestamps, current_ts)
                 future_mask = predictions["timestamp"] == future_ts
 
                 future_price = predictions.loc[future_mask].copy()
@@ -126,7 +126,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
 
                 for symbol, curr_price, future_price in zip(top_x['symbol'], top_x['curr_price'], top_x['future_price']):
                     if future_price / 4 > curr_price:
-                        print(f'reverse split likely, skipping symbol: {symbol}, ts: {curr_ts}, that had curr_price: {curr_price}, and future_price: {future_price}')
+                        print(f'reverse split likely, skipping symbol: {symbol}, ts: {current_ts}, that had curr_price: {curr_price}, and future_price: {future_price}')
                         continue
 
                     h[symbol] += 1
