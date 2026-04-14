@@ -209,8 +209,8 @@ class Orchestration:
             filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
 
 
-        trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, uncertainty_multiplier=0.000, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
-        # trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.wednesday, volatility_importance=0.4)
+        # trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, uncertainty_multiplier=0.000, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
+        trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.wednesday, volatility_importance=0.4)
 
         trading_algorithm.simulate(predictionsDF)
 
@@ -247,7 +247,7 @@ class Orchestration:
         # execute trading strategy
         model_module = ModelModule(self.loss)
 
-        with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=True) as ckpt_path:
+        with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=self.pull_last_ckpt) as ckpt_path:
             ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
             hp = ckpt["hyper_parameters"]
             params = hp["dataset_parameters"]
@@ -260,13 +260,13 @@ class Orchestration:
                                                           inf_dataset, self.learning_rate,
                                                           self.hidden_size, self.attention_head_size,
                                                           self.dropout, self.hidden_continuous_size,
-                                                          self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=True)
+                                                          self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=self.pull_last_ckpt)
 
         predictionsDF = model_module.run_single_day_inference(inf_dataloader, inference_data_module.df)
 
         predictionsDF = model_module.append_actuals_to_simple_predictions(predictionsDF, inference_data_module.df)
 
-        top_x = trading_strategy.generate_buy_list(predictionsDF, False)
+        top_x = trading_strategy.generate_buy_list(predictionsDF)
 
         top_x['quantity'] = money_to_invest / top_x['close']
 
@@ -297,7 +297,7 @@ class Orchestration:
 
         performance_test = self.config[strat]['_test_strategy']
 
-        self.interval_days = self.config[strat]['_interval_days']
+        self.interval_days = self.config[strat].get('_interval_days')
 
         filter_out_x_most_volatile = 0
         if '_filter_out_x_most_volatile' in self.config[strat]:
@@ -307,6 +307,7 @@ class Orchestration:
         if '_day_of_week' in self.config[strat]:
             self.day_of_week = self.config[strat]['_day_of_week']
 
+        self.pull_last_ckpt = self.config[strat].get('_pull_last_ckpt', False)
 
         if performance_test == 'SimpleXDaysAheadBuying':
             return SimpleXDaysAheadBuying(
@@ -317,6 +318,13 @@ class Orchestration:
                     compound_money=self.config[strat]['_compound_money'],
                     dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'],
                     filter_out_x_most_volatile=filter_out_x_most_volatile)
+        elif performance_test == 'VolatilityRanking':
+            day_of_week = DayOfWeek(self.day_of_week) if self.day_of_week else DayOfWeek.tuesday
+            volatility_importance = self.config[strat].get('_volatility_importance', 0.3)
+            return VolatilityRanking(
+                    num_stocks_purchased=self.config[strat]['_num_stocks_purchased'],
+                    day_of_week=day_of_week,
+                    volatility_importance=volatility_importance)
         else:
             raise Exception('The trading strategy specified is not supported')
 
