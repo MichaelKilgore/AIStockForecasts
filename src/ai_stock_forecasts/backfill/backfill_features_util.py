@@ -13,6 +13,7 @@ import numpy as np
 import time
 
 import sys
+import logging
 
 class BackfillFeaturesUtil:
     def __init__(self):
@@ -359,6 +360,15 @@ class BackfillFeaturesUtil:
 
 
 if __name__ == "__main__":
+
+    logging.addLevelName(19, 'INFO_VERBOSE')
+
+    logging.basicConfig(
+        level=logging.INFO,
+        # level='INFO_VERBOSE',
+        format="%(levelname)s - %(message)s"
+    )
+
     obj = BackfillFeaturesUtil()
 
     # with open('../constants/symbols.txt', 'r') as f:
@@ -384,18 +394,24 @@ if __name__ == "__main__":
     #     i += 30
 
 
+
+
+
+    # obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'volume'], symbols, datetime(2026, 1, 2), datetime(2026, 3, 15), TimeFrame(1, TimeFrameUnit.Day), True)
+
     # backfill close log return
-    # obj.backfill_log_return_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0), feature='close')
+    # obj.backfill_log_return_feature(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0), feature='close')
 
     # backfill wick's
     # obj.backfill_wicks_body_range(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
     # backfill vix
-    # obj.backfill_vix_feature(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    # obj.backfill_vix_feature(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0))
     # backfill suprise
-    obj.backfill_surprise_features(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
+    obj.backfill_surprise_features(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0))
 
 
-    # obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'volume'], symbols, datetime(2020, 1, 1), datetime(2026, 1, 1), TimeFrame(1, TimeFrameUnit.Day), True)
+
+
 
     #res = obj.get_historical_data_util.get_historical_stock_prices(['AAPL'], datetime(2020, 1, 1), datetime(2025, 11, 1), TimeFrame.Minute)
     #print(len(res))
