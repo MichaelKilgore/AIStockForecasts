@@ -225,6 +225,7 @@ class BackfillFeaturesUtil:
 
     def backfill_log_return_feature(self, symbols: list[str], start: datetime, end: datetime, time_frame: TimeFrame=TimeFrame(1, TimeFrameUnit.Day), feature: str='open'):
         features_data = self.s3_util.get_features_data(symbols, [feature], time_frame)
+        features_data = features_data.sort_values(['symbol', 'timestamp', 'updated_timestamp'])
 
         features_data['feature'] = f'{feature}_log_return'
 
@@ -371,8 +372,8 @@ if __name__ == "__main__":
 
     obj = BackfillFeaturesUtil()
 
-    # with open('../constants/symbols.txt', 'r') as f:
-    with open('src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
+    with open('../constants/symbols.txt', 'r') as f:
+    # with open('src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
         symbols = [line.split('|')[0] for line in f]
 
     # with open('src/ai_stock_forecasts/constants/symbols.txt', 'r') as f:
@@ -400,14 +401,14 @@ if __name__ == "__main__":
     # obj.backfill_base_features(['open', 'close', 'high', 'low', 'open', 'volume'], symbols, datetime(2026, 1, 2), datetime(2026, 3, 15), TimeFrame(1, TimeFrameUnit.Day), True)
 
     # backfill close log return
-    # obj.backfill_log_return_feature(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0), feature='close')
+    obj.backfill_log_return_feature(symbols, datetime(2025, 1, 1, 0, 0), datetime(2026, 3, 15, 0, 0), feature='close')
 
     # backfill wick's
     # obj.backfill_wicks_body_range(symbols, datetime(2020, 1, 1, 0, 0), datetime(2026, 1, 1, 0, 0))
     # backfill vix
     # obj.backfill_vix_feature(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0))
     # backfill suprise
-    obj.backfill_surprise_features(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0))
+    # obj.backfill_surprise_features(symbols, datetime(2026, 1, 2, 0, 0), datetime(2026, 3, 15, 0, 0))
 
 
 
