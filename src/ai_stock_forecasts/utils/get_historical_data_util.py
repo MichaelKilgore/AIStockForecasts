@@ -29,8 +29,8 @@ class GetHistoricalDataUtil:
         self._alpaca_key = os.getenv("ALPACA_KEY")
         self._alpaca_secret = os.getenv("ALPACA_SECRET")
 
-        logging.info("Alpaca Key:", self._alpaca_key)
-        logging.info("Alpaca Secret:", self._alpaca_secret)
+        logging.info(f"Alpaca Key: {self._alpaca_key}")
+        logging.info(f"Alpaca Secret: {self._alpaca_secret}")
 
         self.stock_client = StockHistoricalDataClient(self._alpaca_key, self._alpaca_secret)
 
