@@ -46,7 +46,6 @@ class DynamoDBUtil:
     """ order structure:
             pk: model_id
             sk: order_timestamp
-            total_money_invested,
             orders: [
                 {
                     symbol,
@@ -62,7 +61,6 @@ class DynamoDBUtil:
             Item={
                 'model_id': order.model_id,
                 'order_timestamp': str(order.order_timestamp),
-                'total_money_invested': Decimal(str(order.total_money_invested)),
                 'orders': [ { 'symbol': order_item.symbol, 'quantity': Decimal(str(order_item.quantity)), 'order_type': order_item.order_type } for order_item in order.order_items ]
             }
         )
@@ -81,7 +79,7 @@ class DynamoDBUtil:
 
         order_items = [ OrderItem(order['symbol'], order['quantity'], OrderSide(order['order_type'])) for order in latest['orders']]
 
-        return Order(latest['model_id'], datetime.fromisoformat(latest['order_timestamp']), latest['total_money_invested'], order_items)
+        return Order(latest['model_id'], datetime.fromisoformat(latest['order_timestamp']), order_items)
 
 
 if __name__ == "__main__":
@@ -95,6 +93,6 @@ if __name__ == "__main__":
     # db.upload_order(order)
     order = db.get_latest_order('test_model_id')
 
-    print(order.model_id, order.order_timestamp, order.total_money_invested, order.order_items[0].symbol)
+    print(order.model_id, order.order_timestamp, order.order_items[0].symbol)
 
 
