@@ -215,10 +215,7 @@ class Orchestration:
         trading_algorithm.simulate(predictionsDF)
 
 
-    ''' Setting testing to true does not gate any logic. All it does is move the day we run inference for back 
-        till we reach a day the stock market was actually open. It thing skips any logic preventing trading earlier than intended.
-
-        This is helpful for testing this workflow on days when the market isn't open like on Saturdays.'''
+    ''' Setting testing to true skips db upload and actually execute sell / buy in alpaca.'''
     def execute_buy(self, testing: bool=False):
 
         curr_day = get_prev_market_open_day()
@@ -234,7 +231,7 @@ class Orchestration:
         trading_strategy = self._init_trading_strategy()
 
         # sell previous order
-        if latest_order is not None:
+        if latest_order is not None and not testing:
             order_items = [
                 OrderItem(r.symbol, round(r.quantity, 2), OrderSide.SELL)
                 for r in latest_order.order_items
@@ -268,19 +265,23 @@ class Orchestration:
 
         top_x = trading_strategy.generate_buy_list(predictionsDF)
 
-        top_x['quantity'] = money_to_invest / top_x['close']
+        money_per_symbol = money_to_invest / len(top_x)
+        top_x['quantity'] = money_per_symbol / top_x['close']
+        print('TESTING')
+        print(top_x)
 
         order_items = [
             OrderItem(r.symbol, math.floor(r.quantity), OrderSide.BUY)
             for r in top_x.itertuples(index=False)
         ]
 
-        # upload orders to db
-        order = Order(self.model_id, datetime.now(), order_items=order_items)
-        self.db_util.upload_order(order)
+        if not testing:
+            # upload orders to db
+            order = Order(self.model_id, datetime.now(), order_items=order_items)
+            self.db_util.upload_order(order)
 
-        # execute orders in alpaca
-        self.order_util.place_order(order)
+            # execute orders in alpaca
+            self.order_util.place_order(order)
 
     def run_checkpoint_upload(self):
         logging.info("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
@@ -354,13 +355,13 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-many-symbols-and-yfinance-and-more-complex')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-more-recent-training')
     # 0 = False, 1 = True
     parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=1)
+    parser.add_argument('--run_evaluation', type=bool, default=0)
 
-    parser.add_argument('--execute_buy', type=bool, default=0)
+    parser.add_argument('--execute_buy', type=bool, default=1)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
