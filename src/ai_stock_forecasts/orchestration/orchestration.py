@@ -31,6 +31,12 @@ import math
 
 import logging
 
+from ai_stock_forecasts.orchestration.funcs.run_training import run_training
+from ai_stock_forecasts.orchestration.funcs.run_batch_inference import run_batch_inference
+from ai_stock_forecasts.orchestration.funcs.run_evaluation import run_evaluation
+
+
+
 class Orchestration:
     def __init__(self, symbols: list[str], model_id: str, config_path: str):
         with open(config_path, "r", encoding="utf-8") as f:
@@ -118,102 +124,13 @@ class Orchestration:
             self.is_large = self.config['is_large']
 
     def run_training(self):
-        training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                   self.time_frame,
-                                                   self.max_lookback_period,
-                                                   self.max_prediction_length,
-                                                   self.target,
-                                                   self.target_normalizer)
-
-        train_dataset, val_dataset = training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        train_dataloader, val_dataloader = training_data_module.construct_train_and_validation_dataloaders(train_dataset, val_dataset, self.batch_size, self.num_workers, self.use_gpu)
-
-        if self.config['devices'] > 1:
-            training_data_module.cache_df()
-
-        model_module = ModelModule(self.loss)
-
-        if self.fine_tuning_model_id:
-            self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
-
-        model_module.run_training(train_dataset, self.learning_rate, self.hidden_size,
-                                   self.attention_head_size, self.dropout, self.hidden_continuous_size,
-                                   self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
-                                   self.accelerator, self.devices, train_dataloader,
-                                   val_dataloader, self.gradient_clip_val)
-
-        model_module.upload_checkpoints_to_s3(self.model_id)
+        run_training(self)
 
     def run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
-        training_data_module = TrainingDataModule(self.symbols, self.features,
-                                                       self.time_frame,
-                                                       self.max_lookback_period,
-                                                       self.max_prediction_length,
-                                                       self.target,
-                                                       self.target_normalizer)
-
-        train_dataset, val_dataset = training_data_module.construct_training_and_validation_datasets(self.train_start, self.train_end, self.val_end)
-        train_dataloader, val_dataloader = training_data_module.construct_train_and_validation_dataloaders(train_dataset, val_dataset, self.batch_size, self.num_workers, self.use_gpu)
-
-        '''
-        TODO: For whatever reason when you break up the data into multiple dataloaders, predictions can be slightly different, not sure why though.
-        # if self.is_large:
-        #     test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end, 10, self.max_prediction_length)
-        # else:
-
-        Also I recently upgraded my systems total ram to 64gb so skipping breaking up the datasets unless I find I need to again in the future.
-        '''
-        test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end)
-
-        test_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
-
-        model_module = ModelModule(self.loss)
-
-        self._load_model(model_module, train_dataset, load_last_ckpt=load_last_ckpt)
-
-        del train_dataset
-        del val_dataset
-        del train_dataloader
-        del val_dataloader
-        del test_datasets
-
-        model_module.run_batch_inference(test_dataloaders, self.model_id, training_data_module.df, save_predictions, self.is_large)
+        run_batch_inference(self, save_predictions, load_last_ckpt)
 
     def run_evaluation(self):
-        model_module = ModelModule(self.loss)
-
-        try:
-            predictionsDF = model_module.load_human_readable_predictions(self.model_id)
-        except:
-            raise Exception('You must run batch inference before attempting to run evaluation')
-
-
-        """ If our model is predicting something other than actual stock numbers
-            we want to pull a real stock number instead and evaluate with that.
-
-            For example, predicting open_log_return is a calculated field and we want to calculate how much money we would actually make. To do that we can either reverse engineer the feature or better yet, just pull open and use that instead. Which is what we are doing.
-        """
-        dummy_data_module = None
-        filtered_df: Optional[pd.DataFrame] = None
-        if self.target not in ['close', 'high', 'low', 'open']:
-            dummy_data_module = TrainingDataModule(self.symbols, ['close', 'close_log_return'],
-                                                       self.time_frame,
-                                                       self.max_lookback_period,
-                                                       self.max_prediction_length,
-                                                       'close',
-                                                       self.target_normalizer)
-
-            predictionsDF = model_module.append_actuals_to_simple_predictions(predictionsDF, dummy_data_module.df)
-
-            filtered_df = dummy_data_module.df.copy()
-            filtered_df = filtered_df[filtered_df['timestamp'] <= self.val_end]
-
-
-        # trading_algorithm = SimpleXDaysAheadBuying(interval_days=5, num_stocks_purchased=10, uncertainty_multiplier=0.000, filter_out_x_most_volatile=200, predicting_raw_num=self.target in ['close', 'high', 'low', 'open'], pivot_df=filtered_df, day_of_week=DayOfWeek.tuesday)
-        trading_algorithm = VolatilityRanking(num_stocks_purchased=10, day_of_week=DayOfWeek.wednesday, volatility_importance=0.4)
-
-        trading_algorithm.simulate(predictionsDF)
-
+        run_evaluation(self)
 
     ''' Setting testing to true skips db upload and actually execute sell / buy in alpaca.'''
     def execute_buy(self, testing: bool=False):
@@ -314,10 +231,7 @@ class Orchestration:
             return SimpleXDaysAheadBuying(
                     interval_days=self.interval_days,
                     num_stocks_purchased=self.config[strat]['_num_stocks_purchased'],
-                    capital_gains_tax=self.config[strat]['_capital_gains_tax'],
                     uncertainty_multiplier=self.config[strat]['_uncertainty_multiplier'],
-                    compound_money=self.config[strat]['_compound_money'],
-                    dont_buy_negative_stocks=self.config[strat]['_dont_buy_negative_stocks'],
                     filter_out_x_most_volatile=filter_out_x_most_volatile)
         elif performance_test == 'VolatilityRanking':
             day_of_week = DayOfWeek(self.day_of_week) if self.day_of_week else DayOfWeek.tuesday
