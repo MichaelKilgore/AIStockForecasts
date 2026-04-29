@@ -1,7 +1,7 @@
 
 from typing import Optional
 from ai_stock_forecasts.data.training_data_module import TrainingDataModule
-from ai_stock_forecasts.model.model_module import ModelModule
+from ai_stock_forecasts.model.tft_model_module import TftModelModule
 from ai_stock_forecasts.models.day_of_week import DayOfWeek
 from ai_stock_forecasts.trading_algorithms.volatility_ranking import VolatilityRanking
 import pandas as pd
@@ -16,7 +16,7 @@ def run_evaluation(self):
         raise Exception(f'model type: {self.model_type} not supported')
 
 def _tft_run_evaluation(self):
-    model_module = ModelModule(self.loss)
+    model_module = TftModelModule(self.loss)
 
     try:
         predictionsDF = model_module.load_human_readable_predictions(self.model_id)

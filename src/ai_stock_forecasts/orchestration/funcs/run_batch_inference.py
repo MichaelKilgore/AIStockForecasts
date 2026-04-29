@@ -1,6 +1,6 @@
 
 from ai_stock_forecasts.data.training_data_module import TrainingDataModule
-from ai_stock_forecasts.model.model_module import ModelModule
+from ai_stock_forecasts.model.tft_model_module import TftModelModule
 
 
 def run_batch_inference(self, *args):
@@ -34,7 +34,7 @@ def _tft_run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
 
     test_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
 
-    model_module = ModelModule(self.loss)
+    model_module = TftModelModule(self.loss)
 
     self._load_model(model_module, train_dataset, load_last_ckpt=load_last_ckpt)
 

@@ -54,7 +54,7 @@ class StepPrint(Callback):
             )
 
 
-class ModelModule:
+class TftModelModule:
     def __init__(self, loss=QuantileLoss(quantiles=[0.3, 0.5, 0.7])):
         self.s3_util = S3ParquetUtil()
 

@@ -13,7 +13,7 @@ from ai_stock_forecasts.trading_algorithms.volatility_ranking import VolatilityR
 from ai_stock_forecasts.utils.date_util import get_prev_market_open_day
 from ai_stock_forecasts.utils.dynamodb_util import DynamoDBUtil
 from ai_stock_forecasts.data.inference_data_module import InferenceDataModule
-from ai_stock_forecasts.model.model_module import ModelModule
+from ai_stock_forecasts.model.tft_model_module import TftModelModule
 from ai_stock_forecasts.trading_algorithms.base_trading_module import BaseTradingModule
 from ai_stock_forecasts.trading_algorithms.simple_x_days_ahead_buying import SimpleXDaysAheadBuying
 import sys
@@ -167,7 +167,7 @@ class Orchestration:
             self.order_util.close_all_positions()
 
         # execute trading strategy
-        model_module = ModelModule(self.loss)
+        model_module = TftModelModule(self.loss)
 
         with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=self.pull_last_ckpt) as ckpt_path:
             ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
@@ -212,7 +212,7 @@ class Orchestration:
         logging.info("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
         ans = input()
         if ans == "y":
-            model_module = ModelModule(self.loss)
+            model_module = TftModelModule(self.loss)
 
             model_module.upload_checkpoints_to_s3(self.model_id)
         else:
@@ -251,7 +251,7 @@ class Orchestration:
         else:
             raise Exception('The trading strategy specified is not supported')
 
-    def _load_model(self, model_module: ModelModule, train_dataset: TimeSeriesDataSet, model_id='', modify_dropout=False, load_last_ckpt: bool=False):
+    def _load_model(self, model_module: TftModelModule, train_dataset: TimeSeriesDataSet, model_id='', modify_dropout=False, load_last_ckpt: bool=False):
         model_id = model_id if model_id != '' else self.model_id
         if not modify_dropout:
             try:
@@ -279,11 +279,11 @@ def parse_args():
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
     parser.add_argument('--model_id', type=str, default='ubuntu-with-even-more-recent-training')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=1)
+    parser.add_argument('--run_training', type=bool, default=0)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=0)
 
-    parser.add_argument('--execute_buy', type=bool, default=0)
+    parser.add_argument('--execute_buy', type=bool, default=1)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
@@ -324,7 +324,7 @@ def main():
     if args.run_evaluation:
         orc.run_evaluation()
     if args.execute_buy:
-        orc.execute_buy(True)
+        orc.execute_buy(False)
     if args.run_checkpoint_upload:
         orc.run_checkpoint_upload()
 

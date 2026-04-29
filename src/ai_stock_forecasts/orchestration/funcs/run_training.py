@@ -1,6 +1,6 @@
 
 from ai_stock_forecasts.data.training_data_module import TrainingDataModule
-from ai_stock_forecasts.model.model_module import ModelModule
+from ai_stock_forecasts.model.tft_model_module import TftModelModule
 
 
 def run_training(self):
@@ -25,7 +25,7 @@ def _tft_run_training(self):
     if self.config['devices'] > 1:
         training_data_module.cache_df()
 
-    model_module = ModelModule(self.loss)
+    model_module = TftModelModule(self.loss)
 
     if self.fine_tuning_model_id:
         self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
