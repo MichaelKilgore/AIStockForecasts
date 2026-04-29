@@ -55,8 +55,14 @@ class Orchestration:
 
         self.train_start = datetime.fromisoformat(self.config['train_start']).replace(tzinfo=timezone.utc)
         self.train_end = datetime.fromisoformat(self.config['train_end']).replace(tzinfo=timezone.utc)
-        self.val_end = datetime.fromisoformat(self.config['val_end']).replace(tzinfo=timezone.utc)
-        self.test_end = datetime.fromisoformat(self.config['test_end']).replace(tzinfo=timezone.utc)
+        self.val_end = (
+            datetime.fromisoformat(self.config['val_end']).replace(tzinfo=timezone.utc)
+            if self.config.get('val_end') else None
+        )
+        self.test_end = (
+            datetime.fromisoformat(self.config['test_end']).replace(tzinfo=timezone.utc)
+            if self.config.get('test_end') else None
+        )
 
         self.features: list[str] = self.config['features']
 
@@ -122,6 +128,8 @@ class Orchestration:
         self.is_large = False
         if 'is_large' in self.config:
             self.is_large = self.config['is_large']
+
+        self.model_type = self.config.get('model_type', 'tft')
 
     def run_training(self):
         run_training(self)
@@ -269,13 +277,13 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-more-recent-training')
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-even-more-recent-training')
     # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=0)
+    parser.add_argument('--run_training', type=bool, default=1)
     parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=0)
 
-    parser.add_argument('--execute_buy', type=bool, default=1)
+    parser.add_argument('--execute_buy', type=bool, default=0)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)

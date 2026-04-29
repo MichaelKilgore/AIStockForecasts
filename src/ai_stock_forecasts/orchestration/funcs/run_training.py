@@ -5,9 +5,9 @@ from ai_stock_forecasts.model.model_module import ModelModule
 
 def run_training(self):
     if self.model_type == 'lgbm':
-        self._lgbm_run_training(self)
+        _lgbm_run_training(self)
     elif self.model_type == 'tft':
-        self._tft_run_training(self)
+        _tft_run_training(self)
     else:
         raise Exception(f'model type: {self.model_type} not supported')
 

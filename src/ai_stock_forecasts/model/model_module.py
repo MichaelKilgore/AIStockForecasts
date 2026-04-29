@@ -105,7 +105,7 @@ class ModelModule:
                      hidden_continuous_size: int, lstm_layers: int,
                      reduce_on_plateau_patience: int, max_epochs: int,
                      accelerator: str, devices: int,
-                     train_dataloader: DataLoader, val_dataloader: DataLoader,
+                     train_dataloader: DataLoader, val_dataloader: Union[DataLoader, None],
                      gradient_clip_val: Union[None, float]):
 
 
@@ -127,12 +127,16 @@ class ModelModule:
         else:
             logging.info('model is already loaded in, running fine tuning')
 
+        callbacks = self.callbacks if val_dataloader is not None else [
+            cb for cb in self.callbacks if cb is not self.ckpt_best_callback
+        ]
+
         self.trainer = Trainer(
             max_epochs=max_epochs,
             accelerator=accelerator,
             devices=devices,
             strategy="ddp" if devices > 1 else "auto",
-            callbacks=self.callbacks,
+            callbacks=callbacks,
             gradient_clip_val=gradient_clip_val,
             logger=False,
         )

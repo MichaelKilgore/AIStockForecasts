@@ -1414,6 +1414,52 @@ configs:
       _day_of_week: 'Wednesday'
       _pull_last_ckpt: True
       _volatility_importance: 0.4
+  ubuntu-with-even-more-recent-training:
+    notes: 'carbon copy of ubuntu-with-many-symbols-and-yfinance-and-more-complex but trained on more recent data.'
+    features:
+      - close_log_return
+      - day_of_week
+      - day_of_month
+      - month
+      - year
+      - surprise
+      - is_earnings_day
+      - range
+      - body
+      - lower_wick
+      - upper_wick
+      - vix_log
+    target: 'close_log_return'
+    target_normalizer: 'None'
+    train_start: "2025-01-01"
+    train_end: "2026-03-15"
+    max_lookback_period: 90
+    max_prediction_length: 14
+    accelerator: 'cuda'
+    devices: 2
+    num_workers: 4
+    batch_size: 512
+    hidden_size: 128
+    attention_head_size: 8
+    dropout: 0.1
+    hidden_continuous_size: 64
+    lstm_layers: 1
+    learning_rate: 0.001
+    max_epochs: 200
+    time_frame_unit: 'Day'
+    time_frame_amount: 1
+    reduce_on_plateau_patience: 20
+    is_large: True
+    preferred_trading_strategy: '_performance_test_1'
+    _performance_test_1:
+      _test_strategy: VolatilityRanking
+      _note: 'Used latest checkpoint'
+      _num_stocks_purchased: 10
+      _day_of_week: 'Wednesday'
+      _pull_last_ckpt: True
+      _volatility_importance: 0.4
+
+
 
 
 

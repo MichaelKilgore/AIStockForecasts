@@ -107,7 +107,7 @@ class TrainingDataModule(DataModule):
         return wide
 
     def construct_training_and_validation_datasets(self, train_start: datetime, train_end: datetime,
-                                                   validation_end: datetime) -> tuple[TimeSeriesDataSet, TimeSeriesDataSet]:
+                                                   validation_end: Union[datetime, None]) -> tuple[TimeSeriesDataSet, Union[TimeSeriesDataSet, None]]:
         train_mask = (self.df["timestamp"] >= train_start) & (self.df["timestamp"] <= train_end)
         train_df = self.df.loc[train_mask].copy()
 
@@ -127,6 +127,9 @@ class TrainingDataModule(DataModule):
             categorical_encoders=self.categorical_encoders,
             target_normalizer=self.target_normalizer,
         )
+
+        if validation_end is None:
+            return training_dataset, None
 
         training_max_idx = train_df["time_idx"].max()
 
@@ -185,13 +188,17 @@ class TrainingDataModule(DataModule):
         return datasets
 
 
-    def construct_train_and_validation_dataloaders(self, train_dataset: TimeSeriesDataSet, val_dataset: TimeSeriesDataSet,
-                                                   batch_size: int, num_workers: int, pin_memory: bool) -> tuple[DataLoader, DataLoader]:
+    def construct_train_and_validation_dataloaders(self, train_dataset: TimeSeriesDataSet, val_dataset: Union[TimeSeriesDataSet, None],
+                                                   batch_size: int, num_workers: int, pin_memory: bool) -> tuple[DataLoader, Union[DataLoader, None]]:
 
         train_dataloader = train_dataset.to_dataloader(train=True, batch_size=batch_size,
-                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
+                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False)
+
+        if val_dataset is None:
+            return train_dataloader, None
+
         val_dataloader = val_dataset.to_dataloader(train=False, batch_size=batch_size,
-                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False) 
+                num_workers=num_workers, pin_memory=pin_memory, persistent_workers=(num_workers > 0), shuffle=False)
 
         return train_dataloader, val_dataloader
 

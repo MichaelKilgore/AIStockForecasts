@@ -7,7 +7,7 @@ from ai_stock_forecasts.trading_algorithms.volatility_ranking import VolatilityR
 import pandas as pd
 
 
-def run_batch_inference(self):
+def run_evaluation(self):
     if self.model_type == 'lgbm':
         self._lgbm_run_batch_inference(self)
     elif self.model_type == 'tft':
@@ -15,7 +15,7 @@ def run_batch_inference(self):
     else:
         raise Exception(f'model type: {self.model_type} not supported')
 
-def _tft_run_batch_inference(self):
+def _tft_run_evaluation(self):
     model_module = ModelModule(self.loss)
 
     try:
