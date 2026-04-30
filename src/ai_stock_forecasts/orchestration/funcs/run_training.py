@@ -1,5 +1,6 @@
 
 from ai_stock_forecasts.data.training_data_module import TrainingDataModule
+from ai_stock_forecasts.model.lgbm_model_module import LgbmModelModule
 from ai_stock_forecasts.model.tft_model_module import TftModelModule
 
 
@@ -39,5 +40,27 @@ def _tft_run_training(self):
     model_module.upload_checkpoints_to_s3(self.model_id)
 
 def _lgbm_run_training(self):
-    pass
+    training_data_module = TrainingDataModule(self.symbols, self.features,
+                                               self.time_frame,
+                                               self.max_lookback_period,
+                                               self.max_prediction_length,
+                                               self.target,
+                                               self.target_normalizer)
+
+    model_module = LgbmModelModule()
+
+    model_module.run_training(
+        df=training_data_module.df,
+        train_start=self.train_start,
+        train_end=self.train_end,
+        val_end=self.val_end,
+        target=self.target,
+        prediction_horizon=self.max_prediction_length,
+        learning_rate=self.learning_rate,
+        n_estimators=self.config.get('n_estimators', 500),
+        num_leaves=self.config.get('num_leaves', 63),
+        min_child_samples=self.config.get('min_child_samples', 20),
+    )
+
+    model_module.upload_model(self.model_id)
 

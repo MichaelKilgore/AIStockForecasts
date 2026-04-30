@@ -9,9 +9,9 @@ import pandas as pd
 
 def run_evaluation(self):
     if self.model_type == 'lgbm':
-        self._lgbm_run_batch_inference(self)
+        _lgbm_run_evaluation(self)
     elif self.model_type == 'tft':
-        self._tft_run_batch_inference(self)
+        _tft_run_evaluation(self)
     else:
         raise Exception(f'model type: {self.model_type} not supported')
 
@@ -52,6 +52,6 @@ def _tft_run_evaluation(self):
 
 
 
-def _lgbm_run_batch_inference(self):
+def _lgbm_run_evaluation(self):
     pass
 

@@ -5,9 +5,9 @@ from ai_stock_forecasts.model.tft_model_module import TftModelModule
 
 def run_batch_inference(self, *args):
     if self.model_type == 'lgbm':
-        self._lgbm_run_batch_inference(self)
+        _lgbm_run_batch_inference(self)
     elif self.model_type == 'tft':
-        self._tft_run_batch_inference(self, args)
+        _tft_run_batch_inference(self, args)
     else:
         raise Exception(f'model type: {self.model_type} not supported')
 

@@ -42,7 +42,6 @@ class Orchestration:
         with open(config_path, "r", encoding="utf-8") as f:
             full_config = yaml.safe_load(f) or {}
 
-        self.symbols = symbols
         self.model_id = model_id
 
         if 'configs' not in full_config:
@@ -52,6 +51,9 @@ class Orchestration:
             raise Exception(f'The config id: {self.model_id} passed is not defined in configurations')
 
         self.config = full_config['configs'][self.model_id]
+
+        self.test_model: bool = self.config.get('test_model', False)
+        self.symbols = ['AAPL'] if self.test_model else symbols
 
         self.train_start = datetime.fromisoformat(self.config['train_start']).replace(tzinfo=timezone.utc)
         self.train_end = datetime.fromisoformat(self.config['train_end']).replace(tzinfo=timezone.utc)
@@ -283,7 +285,7 @@ def parse_args():
     parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=0)
 
-    parser.add_argument('--execute_buy', type=bool, default=1)
+    parser.add_argument('--execute_buy', type=bool, default=0)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
@@ -305,11 +307,6 @@ def main():
 
     with open('/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/many_symbols.txt', 'r') as f:
         symbols = [line.split('|')[0] for line in f]
-
-    # symbols = symbols[:2500]
-
-    # with open(args.symbols_path, "r") as f:
-    #     symbols = [line.strip() for line in f]
 
     # when running locally
     if os.environ.get("SM_MODEL_DIR") is None:
