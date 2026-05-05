@@ -1,6 +1,7 @@
 configs:
   lgbm-test-model:
     test_model: True
+    model_type: 'lgbm'
     notes: ''
     features:
       - close_log_return
@@ -19,6 +20,7 @@ configs:
     target_normalizer: 'None'
     train_start: "2025-01-01"
     train_end: "2026-03-15"
+    max_prediction_length: 7
     accelerator: 'cuda'
     learning_rate: 0.001
     time_frame_unit: 'Day'

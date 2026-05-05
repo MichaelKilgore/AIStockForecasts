@@ -27,6 +27,7 @@ from ai_stock_forecasts.ordering.order_util import OrderUtil
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
 
 import pandas as pd
+import numpy as np
 import math
 
 import logging
@@ -68,26 +69,47 @@ class Orchestration:
 
         self.features: list[str] = self.config['features']
 
-        self.batch_size: int = self.config['batch_size']
-        self.num_workers: int = self.config['num_workers']
-
         if sys.platform == 'darwin':
             self.accelerator: str = 'mps'
         else:
             self.accelerator: str = self.config['accelerator']
 
-        self.devices: int = self.config['devices']
-
         time_frame_amount: int = self.config['time_frame_amount']
         time_frame_unit: str = self.config['time_frame_unit']
         self.time_frame: TimeFrame = TimeFrame(time_frame_amount, TimeFrameUnit(time_frame_unit))
 
-        self.max_lookback_period: int = self.config['max_lookback_period']
         self.max_prediction_length: int = self.config['max_prediction_length']
 
         self.use_gpu = self.accelerator in ('gpu', 'cuda', 'mps')
 
         self.learning_rate: float = self.config['learning_rate']
+
+        self.db_util = DynamoDBUtil()
+        self.order_util = OrderUtil()
+        self.s3_util = S3ParquetUtil()
+
+        if 'target' in self.config:
+            self.target = self.config['target']
+        else:
+            self.target = 'open'
+
+        if 'target_normalizer' in self.config:
+            self.target_normalizer = self.config['target_normalizer']
+        else:
+            self.target_normalizer = 'auto'
+
+        self.model_type = self.config.get('model_type', 'tft')
+
+        if self.model_type == 'tft':
+            self._init_tft_args()
+
+    def _init_tft_args(self):
+        self.max_lookback_period: int = self.config['max_lookback_period']
+
+        self.devices: int = self.config['devices']
+        self.batch_size: int = self.config['batch_size']
+        self.num_workers: int = self.config['num_workers']
+
         self.hidden_size: int = self.config['hidden_size']
         self.attention_head_size: int = self.config['attention_head_size']
         self.dropout: float = self.config['dropout']
@@ -101,10 +123,6 @@ class Orchestration:
         else:
             self.fine_tuning_model_id = None
 
-        self.db_util = DynamoDBUtil()
-        self.order_util = OrderUtil()
-        self.s3_util = S3ParquetUtil()
-
         self.quantiles: list[float] = self.config['quantiles'] if 'quantiles' in self.config else [0.3, 0.5, 0.7]
 
         if 'loss' not in self.config:
@@ -117,21 +135,9 @@ class Orchestration:
         else:
             self.gradient_clip_val = self.config['gradient_clip_val']
 
-        if 'target' in self.config:
-            self.target = self.config['target']
-        else:
-            self.target = 'open'
-
-        if 'target_normalizer' in self.config:
-            self.target_normalizer = self.config['target_normalizer']
-        else:
-            self.target_normalizer = 'auto'
-
         self.is_large = False
         if 'is_large' in self.config:
             self.is_large = self.config['is_large']
-
-        self.model_type = self.config.get('model_type', 'tft')
 
     def run_training(self):
         run_training(self)
@@ -194,11 +200,19 @@ class Orchestration:
 
         money_per_symbol = money_to_invest / len(top_x)
         top_x['quantity'] = money_per_symbol / top_x['close']
+
+        holding_period_days = 5
+        top_x['expected_future_price'] = top_x.apply(
+            lambda r: r['close'] * np.exp(np.sum(r['y_pred_p50'][:min(holding_period_days, len(r['y_pred_p50']))])),
+            axis=1
+        )
+        top_x['limit_price'] = ((top_x['close'] + top_x['expected_future_price']) / 2).round(2)
+
         print('TESTING')
         print(top_x)
 
         order_items = [
-            OrderItem(r.symbol, math.floor(r.quantity), OrderSide.BUY)
+            OrderItem(r.symbol, math.floor(r.quantity), OrderSide.BUY, limit_price=round(float(r.limit_price), 2))
             for r in top_x.itertuples(index=False)
         ]
 
@@ -285,7 +299,7 @@ def parse_args():
     parser.add_argument('--run_batch_inference', type=bool, default=0)
     parser.add_argument('--run_evaluation', type=bool, default=0)
 
-    parser.add_argument('--execute_buy', type=bool, default=0)
+    parser.add_argument('--execute_buy', type=bool, default=1)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
@@ -321,7 +335,7 @@ def main():
     if args.run_evaluation:
         orc.run_evaluation()
     if args.execute_buy:
-        orc.execute_buy(False)
+        orc.execute_buy(True)
     if args.run_checkpoint_upload:
         orc.run_checkpoint_upload()
 

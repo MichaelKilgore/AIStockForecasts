@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from ai_stock_forecasts.models.order import Order, OrderItem
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.requests import LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 import os
@@ -27,18 +27,21 @@ class OrderUtil:
 
         self.trading_client = TradingClient(self._alpaca_key, self._alpaca_secret, paper=True)
 
-    def place_order(self, order: Order): 
+    def place_order(self, order: Order):
         for order_item in order.order_items:
-            market_order_data = MarketOrderRequest(
+            assert order_item.limit_price is not None, f'limit_price is required for order on symbol: {order_item.symbol}'
+
+            limit_order_data = LimitOrderRequest(
                 symbol=order_item.symbol,
                 qty=math.floor(order_item.quantity),
                 side=order_item.order_type,
-                time_in_force=TimeInForce.DAY
+                time_in_force=TimeInForce.DAY,
+                limit_price=order_item.limit_price
             )
 
-            logging.info(f'placing order on symbol: {order_item.symbol}, qty: {order_item.quantity}, side: {order_item.order_type}')
+            logging.info(f'placing limit order on symbol: {order_item.symbol}, qty: {order_item.quantity}, side: {order_item.order_type}, limit_price: {order_item.limit_price}')
             _ = self.trading_client.submit_order(
-                order_data=market_order_data
+                order_data=limit_order_data
             )
 
     def close_all_positions(self):

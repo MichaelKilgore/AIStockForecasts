@@ -42,7 +42,7 @@ def _tft_run_training(self):
 def _lgbm_run_training(self):
     training_data_module = TrainingDataModule(self.symbols, self.features,
                                                self.time_frame,
-                                               self.max_lookback_period,
+                                               -1,
                                                self.max_prediction_length,
                                                self.target,
                                                self.target_normalizer)
