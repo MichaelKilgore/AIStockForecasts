@@ -50,6 +50,30 @@ def print_model_weekly_performance(model_id: str, rows: List[Dict[str, Any]]):
     print(f'\noverall avg of weekly avgs: {_color_pct(overall)} across {len(rows)} weeks')
 
 
+def print_model_last_week_symbol_performance(model_id: str, rows: List[Dict[str, Any]]):
+    print(f'last week per-symbol performance for model: {model_id}')
+
+    if not rows:
+        print('  no completed buy/sell cycles yet')
+        return
+
+    headers = ('symbol', 'buy_price', 'sell_price', 'pct_change')
+    table = [
+        (
+            row['symbol'],
+            f"${row['buy_price']:.2f}",
+            f"${row['sell_price']:.2f}",
+            _color_pct(row['pct_change']),
+        )
+        for row in rows
+    ]
+
+    _print_table(headers, table)
+
+    overall = sum(row['pct_change'] for row in rows) / len(rows)
+    print(f'\navg across {len(rows)} symbols: {_color_pct(overall)}')
+
+
 def _color_pct(value: float) -> str:
     text = f'{value:+.2f}%'
     color = _GREEN if value >= 0 else _RED
@@ -76,19 +100,24 @@ def _print_table(headers, rows):
 
 
 if __name__ == '__main__':
+    from ai_stock_forecasts.utils.postgres_util import PostgresUtil
+
+    pg = PostgresUtil()
+
+    ranking = pg.get_models_ranked_by_avg_weekly_performance()
+
     print('=== print_models_ranking ===')
-    print_models_ranking([
-        {'model_id': 'tft-v1', 'avg_weekly_performance': 4.27, 'weeks_traded': 12},
-        {'model_id': 'lgbm-v2', 'avg_weekly_performance': 1.83, 'weeks_traded': 9},
-        {'model_id': 'tft-experimental', 'avg_weekly_performance': -2.14, 'weeks_traded': 5},
-    ])
+    print_models_ranking(ranking)
 
+    if ranking:
+        top_model_id = ranking[0]['model_id']
+        print(f'\n=== print_model_weekly_performance ({top_model_id}) ===')
+        print_model_weekly_performance(top_model_id, pg.get_model_weekly_performance(top_model_id))
 
-    print('\n=== print_model_weekly_performance ===')
-    print_model_weekly_performance('tft-v1', [
-        {'week': '2026-04-13', 'avg_weekly_pct': 3.21, 'num_symbols': 5},
-        {'week': '2026-04-20', 'avg_weekly_pct': -1.05, 'num_symbols': 5},
-        {'week': '2026-04-27', 'avg_weekly_pct': 6.78, 'num_symbols': 4},
-        {'week': '2026-05-04', 'avg_weekly_pct': 2.50, 'num_symbols': 5},
-    ])
+    target_model_id = 'ubuntu-with-even-more-recent-training'
+    print(f'\n=== print_model_last_week_symbol_performance ({target_model_id}) ===')
+    print_model_last_week_symbol_performance(
+        target_model_id,
+        pg.get_model_last_week_symbol_performance(target_model_id),
+    )
 

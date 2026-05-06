@@ -138,6 +138,60 @@ class PostgresUtil:
         ]
 
 
+    def get_model_last_week_symbol_performance(self, model_id: str) -> List[Dict[str, Any]]:
+        query = """
+            WITH buys AS (
+                SELECT model_id, symbol, timestamp, price
+                FROM transactions
+                WHERE side = 'buy' AND model_id = %s
+            ),
+            matched AS (
+                SELECT
+                    b.symbol,
+                    b.price AS buy_price,
+                    s.timestamp AS sell_ts,
+                    s.price AS sell_price,
+                    ((s.price - b.price) / b.price) * 100 AS pct_change
+                FROM buys b
+                JOIN LATERAL (
+                    SELECT timestamp, price
+                    FROM transactions s
+                    WHERE s.side = 'sell'
+                      AND s.model_id = b.model_id
+                      AND s.symbol = b.symbol
+                      AND s.timestamp > b.timestamp
+                    ORDER BY s.timestamp ASC
+                    LIMIT 1
+                ) s ON TRUE
+            ),
+            latest_week AS (
+                SELECT date_trunc('week', MAX(sell_ts)) AS week FROM matched
+            )
+            SELECT
+                m.symbol,
+                m.buy_price,
+                m.sell_price,
+                m.pct_change
+            FROM matched m, latest_week lw
+            WHERE date_trunc('week', m.sell_ts) = lw.week
+            ORDER BY m.pct_change DESC
+        """
+
+        with self.conn.cursor() as cur:
+            cur.execute(query, (model_id,))
+            rows = cur.fetchall()
+
+        return [
+            {
+                'symbol': symbol,
+                'buy_price': float(buy_price),
+                'sell_price': float(sell_price),
+                'pct_change': float(pct_change),
+            }
+            for symbol, buy_price, sell_price, pct_change in rows
+        ]
+
+
 if __name__ == '__main__':
     u = PostgresUtil()
 
@@ -146,3 +200,5 @@ if __name__ == '__main__':
     print(u.get_models_ranked_by_avg_weekly_performance())
 
     print(u.get_model_weekly_performance('test-model'))
+
+    print(u.get_model_last_week_symbol_performance('test-model'))
