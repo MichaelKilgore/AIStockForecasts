@@ -24,7 +24,9 @@ from ai_stock_forecasts.models.order import Order, OrderItem
 from alpaca.trading.enums import OrderSide
 
 from ai_stock_forecasts.ordering.order_util import OrderUtil
+from ai_stock_forecasts.utils.postgres_util import PostgresUtil
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
+from ai_stock_forecasts.utils.yfinance_util import YfinanceUtil
 
 import pandas as pd
 import numpy as np
@@ -87,6 +89,8 @@ class Orchestration:
         self.db_util = DynamoDBUtil()
         self.order_util = OrderUtil()
         self.s3_util = S3ParquetUtil()
+        self.postgres_util = PostgresUtil()
+        self.yfinance_util = YfinanceUtil()
 
         if 'target' in self.config:
             self.target = self.config['target']
@@ -174,6 +178,21 @@ class Orchestration:
             self.db_util.upload_order(sell_order)
             self.order_util.close_all_positions()
 
+            sell_timestamp = datetime.now()
+            sell_prices = {
+                stock.symbol: stock.price
+                for stock in self.yfinance_util.get_current_prices([oi.symbol for oi in order_items])
+            }
+            for oi in order_items:
+                self.postgres_util.add_transaction(
+                    model_id=self.model_id,
+                    symbol=oi.symbol,
+                    timestamp=sell_timestamp,
+                    price=sell_prices[oi.symbol],
+                    count=int(oi.quantity),
+                    side='sell',
+                )
+
         # execute trading strategy
         model_module = TftModelModule(self.loss)
 
@@ -216,13 +235,26 @@ class Orchestration:
             for r in top_x.itertuples(index=False)
         ]
 
+        buy_prices = { r.symbol: float(r.close) for r in top_x.itertuples(index=False) }
+
         if not testing:
             # upload orders to db
-            order = Order(self.model_id, datetime.now(), order_items=order_items)
+            buy_timestamp = datetime.now()
+            order = Order(self.model_id, buy_timestamp, order_items=order_items)
             self.db_util.upload_order(order)
 
             # execute orders in alpaca
             self.order_util.place_order(order)
+
+            for oi in order_items:
+                self.postgres_util.add_transaction(
+                    model_id=self.model_id,
+                    symbol=oi.symbol,
+                    timestamp=buy_timestamp,
+                    price=buy_prices[oi.symbol],
+                    count=int(oi.quantity),
+                    side='buy',
+                )
 
     def run_checkpoint_upload(self):
         logging.info("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
@@ -335,7 +367,7 @@ def main():
     if args.run_evaluation:
         orc.run_evaluation()
     if args.execute_buy:
-        orc.execute_buy(True)
+        orc.execute_buy(False)
     if args.run_checkpoint_upload:
         orc.run_checkpoint_upload()
 
