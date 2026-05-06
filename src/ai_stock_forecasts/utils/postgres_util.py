@@ -91,9 +91,58 @@ class PostgresUtil:
         ]
 
 
+    def get_model_weekly_performance(self, model_id: str) -> List[Dict[str, Any]]:
+        query = """
+            WITH buys AS (
+                SELECT model_id, symbol, timestamp, price
+                FROM transactions
+                WHERE side = 'buy' AND model_id = %s
+            ),
+            matched AS (
+                SELECT
+                    b.symbol,
+                    s.timestamp AS sell_ts,
+                    ((s.price - b.price) / b.price) * 100 AS pct_change
+                FROM buys b
+                JOIN LATERAL (
+                    SELECT timestamp, price
+                    FROM transactions s
+                    WHERE s.side = 'sell'
+                      AND s.model_id = b.model_id
+                      AND s.symbol = b.symbol
+                      AND s.timestamp > b.timestamp
+                    ORDER BY s.timestamp ASC
+                    LIMIT 1
+                ) s ON TRUE
+            )
+            SELECT
+                to_char(date_trunc('week', sell_ts), 'YYYY-MM-DD') AS week,
+                AVG(pct_change) AS avg_weekly_pct,
+                COUNT(*) AS num_symbols
+            FROM matched
+            GROUP BY date_trunc('week', sell_ts)
+            ORDER BY date_trunc('week', sell_ts) ASC
+        """
+
+        with self.conn.cursor() as cur:
+            cur.execute(query, (model_id,))
+            rows = cur.fetchall()
+
+        return [
+            {
+                'week': week,
+                'avg_weekly_pct': float(avg_weekly_pct),
+                'num_symbols': int(num_symbols),
+            }
+            for week, avg_weekly_pct, num_symbols in rows
+        ]
+
+
 if __name__ == '__main__':
     u = PostgresUtil()
 
     u.add_transaction('test-model', 'AAPL', datetime.now(), 192.34, 5, 'buy')
 
     print(u.get_models_ranked_by_avg_weekly_performance())
+
+    print(u.get_model_weekly_performance('test-model'))
