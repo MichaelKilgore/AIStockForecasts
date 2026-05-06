@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from typing import Any, Dict, List
 
 import psycopg2
 from dotenv import load_dotenv
@@ -34,7 +35,65 @@ class PostgresUtil:
         self.conn.commit()
 
 
+    def get_models_ranked_by_avg_weekly_performance(self) -> List[Dict[str, Any]]:
+        query = """
+            WITH buys AS (
+                SELECT model_id, symbol, timestamp, price
+                FROM transactions
+                WHERE side = 'buy'
+            ),
+            matched AS (
+                SELECT
+                    b.model_id,
+                    b.symbol,
+                    s.timestamp AS sell_ts,
+                    ((s.price - b.price) / b.price) * 100 AS pct_change
+                FROM buys b
+                JOIN LATERAL (
+                    SELECT timestamp, price
+                    FROM transactions s
+                    WHERE s.side = 'sell'
+                      AND s.model_id = b.model_id
+                      AND s.symbol = b.symbol
+                      AND s.timestamp > b.timestamp
+                    ORDER BY s.timestamp ASC
+                    LIMIT 1
+                ) s ON TRUE
+            ),
+            weekly_avg AS (
+                SELECT
+                    model_id,
+                    date_trunc('week', sell_ts) AS week,
+                    AVG(pct_change) AS avg_weekly_pct
+                FROM matched
+                GROUP BY model_id, date_trunc('week', sell_ts)
+            )
+            SELECT
+                model_id,
+                AVG(avg_weekly_pct) AS avg_weekly_performance,
+                COUNT(*) AS weeks_traded
+            FROM weekly_avg
+            GROUP BY model_id
+            ORDER BY avg_weekly_performance DESC
+        """
+
+        with self.conn.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+
+        return [
+            {
+                'model_id': model_id,
+                'avg_weekly_performance': float(avg_weekly_performance),
+                'weeks_traded': int(weeks_traded),
+            }
+            for model_id, avg_weekly_performance, weeks_traded in rows
+        ]
+
+
 if __name__ == '__main__':
     u = PostgresUtil()
 
     u.add_transaction('test-model', 'AAPL', datetime.now(), 192.34, 5, 'buy')
+
+    print(u.get_models_ranked_by_avg_weekly_performance())
