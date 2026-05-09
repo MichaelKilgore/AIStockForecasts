@@ -10,3 +10,4 @@ model.tar.gz
 venv
 build/
 lambda.zip
+logs/
