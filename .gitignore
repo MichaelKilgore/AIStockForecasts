@@ -8,3 +8,5 @@
 model.tar.gz
 *.pem
 venv
+build/
+lambda.zip
