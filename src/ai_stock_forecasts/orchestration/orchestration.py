@@ -320,21 +320,31 @@ class Orchestration:
                                                               load_last_ckpt=load_last_ckpt)
 
 
+def _str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('true', 't', '1', 'yes', 'y'):
+        return True
+    if v.lower() in ('false', 'f', '0', 'no', 'n', ''):
+        return False
+    raise argparse.ArgumentTypeError(f'expected boolean, got {v!r}')
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
     parser.add_argument('--model_id', type=str, default='ubuntu-with-even-more-recent-training')
-    # 0 = False, 1 = True
-    parser.add_argument('--run_training', type=bool, default=0)
-    parser.add_argument('--run_batch_inference', type=bool, default=0)
-    parser.add_argument('--run_evaluation', type=bool, default=0)
+    parser.add_argument('--run_training', type=_str2bool, default=False)
+    parser.add_argument('--run_batch_inference', type=_str2bool, default=False)
+    parser.add_argument('--run_evaluation', type=_str2bool, default=False)
 
-    parser.add_argument('--execute_buy', type=bool, default=1)
+    parser.add_argument('--execute_buy', type=_str2bool, default=True)
+    parser.add_argument('--testing', type=_str2bool, default=False)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
-    parser.add_argument('--run_checkpoint_upload', type=bool, default=0)
+    parser.add_argument('--run_checkpoint_upload', type=_str2bool, default=False)
 
     return parser.parse_args()
 
@@ -367,7 +377,7 @@ def main():
     if args.run_evaluation:
         orc.run_evaluation()
     if args.execute_buy:
-        orc.execute_buy(False)
+        orc.execute_buy(args.testing)
     if args.run_checkpoint_upload:
         orc.run_checkpoint_upload()
 
