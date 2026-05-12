@@ -42,18 +42,9 @@ from ai_stock_forecasts.orchestration.funcs.run_evaluation import run_evaluation
 
 class Orchestration:
     def __init__(self, symbols: list[str], model_id: str, config_path: str):
-        with open(config_path, "r", encoding="utf-8") as f:
-            full_config = yaml.safe_load(f) or {}
-
         self.model_id = model_id
 
-        if 'configs' not in full_config:
-            raise Exception(f'the config path: {config_path} passed is not valid')
-
-        if self.model_id not in full_config['configs']:
-            raise Exception(f'The config id: {self.model_id} passed is not defined in configurations')
-
-        self.config = full_config['configs'][self.model_id]
+        self._setConfig(config_path)
 
         self.test_model: bool = self.config.get('test_model', False)
         self.symbols = ['AAPL'] if self.test_model else symbols
@@ -143,13 +134,68 @@ class Orchestration:
         if 'is_large' in self.config:
             self.is_large = self.config['is_large']
 
+    def _setConfig(self, config_path: str):
+        with open(config_path, "r", encoding="utf-8") as f:
+            full_config = yaml.safe_load(f) or {}
+
+        if 'configs' not in full_config:
+            raise Exception(f'the config path: {config_path} passed is not valid')
+
+        if self.model_id not in full_config['configs']:
+            raise Exception(f'The config id: {self.model_id} passed is not defined in configurations')
+
+        raw_config = full_config['configs'][self.model_id]
+
+        if 'variant_of' in raw_config:
+            base_id = raw_config['variant_of']
+            strat_key = raw_config.get('preferred_trading_strategy')
+
+            if strat_key is None:
+                raise Exception(f'Variant model {self.model_id} must set preferred_trading_strategy')
+
+            allowed_keys = {'variant_of', 'preferred_trading_strategy', strat_key}
+            extra = set(raw_config.keys()) - allowed_keys
+            if extra:
+                raise Exception(
+                    f'Variant model {self.model_id} may only override preferred_trading_strategy; '
+                    f'got extra keys: {sorted(extra)}'
+                )
+
+            if base_id not in full_config['configs']:
+                raise Exception(f'Variant {self.model_id} references unknown base model {base_id}')
+
+            base_config = full_config['configs'][base_id]
+            if 'variant_of' in base_config:
+                raise Exception(
+                    f'Variant {self.model_id} points to {base_id}, which is itself a variant. '
+                    f'Variant-of-variant is not allowed.'
+                )
+
+            self.is_variant = True
+            self.base_model_id = base_id
+            self.config = {**base_config, 'preferred_trading_strategy': strat_key, strat_key: raw_config[strat_key]}
+        else:
+            self.is_variant = False
+            self.base_model_id = self.model_id
+            self.config = raw_config
+
+    def _assert_not_variant(self, stage: str):
+        if self.is_variant:
+            raise Exception(
+                f'{stage} is not supported for variant model {self.model_id} '
+                f'(variant_of={self.base_model_id}). Run this stage against the base model.'
+            )
+
     def run_training(self):
+        self._assert_not_variant('run_training')
         run_training(self)
 
     def run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
+        self._assert_not_variant('run_batch_inference')
         run_batch_inference(self, save_predictions, load_last_ckpt)
 
     def run_evaluation(self):
+        self._assert_not_variant('run_evaluation')
         run_evaluation(self)
 
     ''' Setting testing to true skips db upload and actually execute sell / buy in alpaca.'''
@@ -196,7 +242,7 @@ class Orchestration:
         # execute trading strategy
         model_module = TftModelModule(self.loss)
 
-        with self.s3_util.load_best_model_checkpoint(self.model_id, pull_last_ckpt=self.pull_last_ckpt) as ckpt_path:
+        with self.s3_util.load_best_model_checkpoint(self.base_model_id, pull_last_ckpt=self.pull_last_ckpt) as ckpt_path:
             ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
             hp = ckpt["hyper_parameters"]
             params = hp["dataset_parameters"]
@@ -205,7 +251,7 @@ class Orchestration:
         inf_dataset = inference_data_module.construct_inference_dataset(params)
         inf_dataloader = inference_data_module.construct_inference_dataloader(inf_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
-        model_module.load_model_from_checkpoint_and_data(self.model_id, self.accelerator,
+        model_module.load_model_from_checkpoint_and_data(self.base_model_id, self.accelerator,
                                                           inf_dataset, self.learning_rate,
                                                           self.hidden_size, self.attention_head_size,
                                                           self.dropout, self.hidden_continuous_size,
@@ -257,6 +303,7 @@ class Orchestration:
                 )
 
     def run_checkpoint_upload(self):
+        self._assert_not_variant('run_checkpoint_upload')
         logging.info("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
         ans = input()
         if ans == "y":

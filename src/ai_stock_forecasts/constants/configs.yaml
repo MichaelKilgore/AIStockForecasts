@@ -1540,6 +1540,16 @@ configs:
       _day_of_week: 'Wednesday'
       _pull_last_ckpt: True
       _volatility_importance: 0.4
+  ubuntu-with-even-more-recent-training-strat-2:
+    variant_of: 'ubuntu-with-even-more-recent-training'
+    preferred_trading_strategy: '_performance_test_1'
+    _performance_test_1:
+      _test_strategy: VolatilityRanking
+      _note: 'Used latest checkpoint'
+      _num_stocks_purchased: 50
+      _day_of_week: 'Wednesday'
+      _pull_last_ckpt: True
+      _volatility_importance: 0.4
   ubuntu-lgbm-first:
     notes: 'first attempt at training with new lgbm model which predicts binary profit or loss'
     features:
