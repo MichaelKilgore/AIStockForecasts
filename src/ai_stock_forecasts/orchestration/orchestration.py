@@ -186,8 +186,9 @@ class Orchestration:
                 f'(variant_of={self.base_model_id}). Run this stage against the base model.'
             )
 
-    def run_training(self):
+    def run_training(self, resume_from_last_ckpt: bool = False):
         self._assert_not_variant('run_training')
+        self.resume_from_last_ckpt = resume_from_last_ckpt
         run_training(self)
 
     def run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
@@ -382,12 +383,13 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-even-more-recent-training')
-    parser.add_argument('--run_training', type=_str2bool, default=False)
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-long-training')
+    parser.add_argument('--run_training', type=_str2bool, default=True)
+    parser.add_argument('--resume_from_last_ckpt', type=_str2bool, default=False)
     parser.add_argument('--run_batch_inference', type=_str2bool, default=False)
     parser.add_argument('--run_evaluation', type=_str2bool, default=False)
 
-    parser.add_argument('--execute_buy', type=_str2bool, default=True)
+    parser.add_argument('--execute_buy', type=_str2bool, default=False)
     parser.add_argument('--testing', type=_str2bool, default=False)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
@@ -418,7 +420,7 @@ def main():
     orc = Orchestration(symbols, args.model_id, args.config_path)
 
     if args.run_training:
-        orc.run_training()
+        orc.run_training(args.resume_from_last_ckpt)
     if args.run_batch_inference:
         orc.run_batch_inference(save_predictions=True, load_last_ckpt=True)
     if args.run_evaluation:

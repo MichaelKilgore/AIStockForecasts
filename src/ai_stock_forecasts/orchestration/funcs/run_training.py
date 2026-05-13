@@ -1,3 +1,7 @@
+import os
+
+import torch
+from pytorch_forecasting import TemporalFusionTransformer
 
 from ai_stock_forecasts.data.training_data_module import TrainingDataModule
 from ai_stock_forecasts.model.lgbm_model_module import LgbmModelModule
@@ -6,6 +10,8 @@ from ai_stock_forecasts.model.tft_model_module import TftModelModule
 
 def run_training(self):
     if self.model_type == 'lgbm':
+        if self.resume_from_last_ckpt:
+            raise NotImplementedError('resume_from_last_ckpt is only supported for tft models')
         _lgbm_run_training(self)
     elif self.model_type == 'tft':
         _tft_run_training(self)
@@ -30,6 +36,15 @@ def _tft_run_training(self):
 
     if self.fine_tuning_model_id:
         self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
+    elif self.resume_from_last_ckpt:
+        ckpt_path = os.path.join(model_module.ckpt_dir, 'last.ckpt')
+        if not os.path.exists(ckpt_path):
+            raise FileNotFoundError(f'resume_from_last_ckpt set but no checkpoint found at {ckpt_path}')
+        model_module.model = TemporalFusionTransformer.load_from_checkpoint(
+            ckpt_path,
+            map_location=torch.device(self.accelerator),
+            weights_only=False,
+        )
 
     model_module.run_training(train_dataset, self.learning_rate, self.hidden_size,
                                self.attention_head_size, self.dropout, self.hidden_continuous_size,
