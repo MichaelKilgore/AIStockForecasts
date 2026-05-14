@@ -1,7 +1,7 @@
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import psycopg2
@@ -81,12 +81,20 @@ class PostgresUtil:
 
         logging.info(f"inserted {len(rows)} rows into historical_features (time_frame={tf_str})")
 
-    def get_features_data(self, symbols: List[str], features: List[str], time_frame) -> pd.DataFrame:
+    def get_features_data(
+        self,
+        symbols: List[str],
+        features: List[str],
+        time_frame,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> pd.DataFrame:
         tf_str = _time_frame_to_str(time_frame)
 
         logging.info(
             f"pulling feature data from postgres for features: {features}, "
-            f"time_frame: {tf_str}, symbol_count: {len(symbols)}"
+            f"time_frame: {tf_str}, symbol_count: {len(symbols)}, "
+            f"start_date: {start_date}, end_date: {end_date}"
         )
 
         query = """
@@ -96,9 +104,18 @@ class PostgresUtil:
               AND time_frame = %s
               AND symbol    = ANY(%s)
         """
+        params: List[Any] = [list(features), tf_str, list(symbols)]
+
+        if start_date is not None:
+            query += " AND timestamp >= %s"
+            params.append(_as_utc(start_date))
+
+        if end_date is not None:
+            query += " AND timestamp <= %s"
+            params.append(_as_utc(end_date))
 
         with self.conn.cursor() as cur:
-            cur.execute(query, (list(features), tf_str, list(symbols)))
+            cur.execute(query, tuple(params))
             rows = cur.fetchall()
 
         df = pd.DataFrame.from_records(rows, columns=list(_FEATURES_COLUMNS))
