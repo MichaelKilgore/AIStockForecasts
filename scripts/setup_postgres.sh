@@ -62,4 +62,25 @@ CREATE INDEX IF NOT EXISTS transactions_model_id_timestamp_idx
     ON transactions (model_id, timestamp);
 SQL
 
+echo "creating historical_features table (if not exists)"
+"${PSQL_BASE[@]}" -d "$POSTGRES_DB" <<'SQL'
+CREATE TABLE IF NOT EXISTS historical_features (
+    id                BIGSERIAL PRIMARY KEY,
+    symbol            TEXT        NOT NULL,
+    timestamp         TIMESTAMPTZ NOT NULL,
+    feature           TEXT        NOT NULL,
+    value             TEXT        NOT NULL,
+    type              TEXT        NOT NULL,
+    updated_timestamp TIMESTAMPTZ NOT NULL,
+    time_frame        TEXT        NOT NULL,
+    date              DATE        NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS historical_features_lookup_idx
+    ON historical_features (feature, time_frame, symbol, "timestamp");
+
+CREATE INDEX IF NOT EXISTS historical_features_updated_idx
+    ON historical_features (updated_timestamp);
+SQL
+
 echo "postgres setup complete"

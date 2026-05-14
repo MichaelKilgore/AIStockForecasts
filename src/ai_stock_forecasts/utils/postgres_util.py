@@ -1,10 +1,36 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+import pandas as pd
 import psycopg2
+from alpaca.data import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
+from psycopg2.extras import execute_values
+
+from ai_stock_forecasts.models.historical_data import HistoricalData
+
+
+_FEATURES_COLUMNS = (
+    "symbol",
+    "timestamp",
+    "feature",
+    "value",
+    "type",
+    "updated_timestamp",
+    "time_frame",
+    "date",
+)
+
+
+def _time_frame_to_str(tf: TimeFrame) -> str:
+    unit = tf.unit_value.value
+    return unit if tf.amount_value == 1 else f"{tf.amount_value}-{unit}"
+
+
+def _as_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
 
 class PostgresUtil:
@@ -18,6 +44,73 @@ class PostgresUtil:
             password=os.getenv("POSTGRES_PASSWORD", "postgres"),
             dbname=os.getenv("POSTGRES_DB", "ai_stock_forecasts"),
         )
+
+    def upload_features_data_df(self, df: pd.DataFrame, time_frame):
+        if df.empty:
+            return
+
+        tf_str = _time_frame_to_str(time_frame)
+
+        ts = pd.to_datetime(df["timestamp"], utc=True)
+        updated_ts = pd.to_datetime(df["updated_timestamp"], utc=True)
+        date_col = pd.to_datetime(df["date"]).dt.date
+
+        rows = list(zip(
+            df["symbol"].astype(str),
+            ts.dt.to_pydatetime(),
+            df["feature"].astype(str),
+            df["value"].astype(str),
+            df["type"].astype(str),
+            updated_ts.dt.to_pydatetime(),
+            [tf_str] * len(df),
+            date_col,
+        ))
+
+        with self.conn.cursor() as cur:
+            execute_values(
+                cur,
+                """
+                INSERT INTO historical_features
+                    (symbol, timestamp, feature, value, type, updated_timestamp, time_frame, date)
+                VALUES %s
+                """,
+                rows,
+                page_size=1000,
+            )
+        self.conn.commit()
+
+        logging.info(f"inserted {len(rows)} rows into historical_features (time_frame={tf_str})")
+
+    def get_features_data(self, symbols: List[str], features: List[str], time_frame) -> pd.DataFrame:
+        tf_str = _time_frame_to_str(time_frame)
+
+        logging.info(
+            f"pulling feature data from postgres for features: {features}, "
+            f"time_frame: {tf_str}, symbol_count: {len(symbols)}"
+        )
+
+        query = """
+            SELECT symbol, timestamp, feature, value, type, updated_timestamp, time_frame, date
+            FROM historical_features
+            WHERE feature   = ANY(%s)
+              AND time_frame = %s
+              AND symbol    = ANY(%s)
+        """
+
+        with self.conn.cursor() as cur:
+            cur.execute(query, (list(features), tf_str, list(symbols)))
+            rows = cur.fetchall()
+
+        df = pd.DataFrame.from_records(rows, columns=list(_FEATURES_COLUMNS))
+
+        if df.empty:
+            return df
+
+        if time_frame.unit_value in (TimeFrameUnit.Minute, TimeFrameUnit.Hour):
+            h = pd.to_datetime(df["timestamp"], utc=True).dt.hour
+            df = df[(h > 9) & (h < 16)].reset_index(drop=True)
+
+        return df
 
     def add_transaction(self, model_id: str, symbol: str, timestamp: datetime, price: float, count: int, side: str):
         assert side in ('buy', 'sell'), f"side must be 'buy' or 'sell', got: {side}"
