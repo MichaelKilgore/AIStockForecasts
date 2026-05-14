@@ -223,7 +223,7 @@ class Orchestration:
 
             sell_order = Order(self.model_id, curr_day, order_items=order_items)
             self.db_util.upload_order(sell_order)
-            self.order_util.close_all_positions()
+            # self.order_util.close_all_positions()
 
             sell_timestamp = datetime.now()
             sell_prices = {
@@ -231,6 +231,7 @@ class Orchestration:
                 for stock in self.yfinance_util.get_current_prices([oi.symbol for oi in order_items])
             }
             for oi in order_items:
+                break
                 self.postgres_util.add_transaction(
                     model_id=self.model_id,
                     symbol=oi.symbol,
@@ -291,7 +292,7 @@ class Orchestration:
             self.db_util.upload_order(order)
 
             # execute orders in alpaca
-            self.order_util.place_order(order)
+            # self.order_util.place_order(order)
 
             for oi in order_items:
                 self.postgres_util.add_transaction(
