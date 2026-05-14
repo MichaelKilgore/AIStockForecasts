@@ -49,7 +49,7 @@ cd "$REPO"
 # shellcheck disable=SC1091
 source venv/bin/activate
 
-exec python3 src/ai_stock_forecasts/orchestration/orchestration.py \
+exec env PYTHONPATH=src python3 src/ai_stock_forecasts/orchestration/orchestration.py \
   --model_id "$MODEL_ID" \
   --run_training False \
   --run_batch_inference False \
