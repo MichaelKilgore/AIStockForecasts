@@ -137,6 +137,7 @@ class InferenceDataModule(DataModule):
         feats.update(_ALWAYS_PULLED)
         return sorted(feats)
 
+    @Timer(name='InferenceDataModule._pull_and_pivot', text='{name} took {seconds:.2f}s', logger=logging.info)
     def _pull_and_pivot(self, features: list[str], start_date: datetime, end_date: datetime) -> DataFrame:
         start = datetime(start_date.year, start_date.month, start_date.day)
         end = datetime(end_date.year, end_date.month, end_date.day)

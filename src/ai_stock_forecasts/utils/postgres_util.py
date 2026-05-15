@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import psycopg2
 from alpaca.data import TimeFrame, TimeFrameUnit
+from codetiming import Timer
 from dotenv import load_dotenv
 from psycopg2.extras import execute_values
 
@@ -81,6 +82,7 @@ class PostgresUtil:
 
         logging.info(f"inserted {len(rows)} rows into historical_features (time_frame={tf_str})")
 
+    @Timer(name='PostgresUtil.get_features_data', text='{name} took {seconds:.2f}s', logger=logging.info)
     def get_features_data(
         self,
         symbols: List[str],
