@@ -1,3 +1,4 @@
+import io
 import logging
 import os
 from datetime import datetime, timezone
@@ -99,8 +100,8 @@ class PostgresUtil:
             f"start_date: {start_date}, end_date: {end_date}"
         )
 
-        query = """
-            SELECT symbol, timestamp, feature, value, type, updated_timestamp, time_frame, date
+        inner_query = """
+            SELECT symbol, timestamp, feature, value
             FROM historical_features
             WHERE feature   = ANY(%s)
               AND time_frame = %s
@@ -109,18 +110,25 @@ class PostgresUtil:
         params: List[Any] = [list(features), tf_str, list(symbols)]
 
         if start_date is not None:
-            query += " AND timestamp >= %s"
+            inner_query += " AND timestamp >= %s"
             params.append(_as_utc(start_date))
 
         if end_date is not None:
-            query += " AND timestamp <= %s"
+            inner_query += " AND timestamp <= %s"
             params.append(_as_utc(end_date))
 
+        buf = io.StringIO()
         with self.conn.cursor() as cur:
-            cur.execute(query, tuple(params))
-            rows = cur.fetchall()
+            rendered_sql = cur.mogrify(inner_query, tuple(params)).decode()
+            cur.copy_expert(f"COPY ({rendered_sql}) TO STDOUT WITH CSV", buf)
 
-        df = pd.DataFrame.from_records(rows, columns=list(_FEATURES_COLUMNS))
+        buf.seek(0)
+        df = pd.read_csv(
+            buf,
+            header=None,
+            names=['symbol', 'timestamp', 'feature', 'value'],
+            dtype={'symbol': str, 'feature': str, 'value': str},
+        )
 
         if df.empty:
             return df
