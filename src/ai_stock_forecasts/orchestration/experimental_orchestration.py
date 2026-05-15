@@ -32,7 +32,7 @@ class ExperimentalOrchestration(Orchestration):
         test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end)
         tst_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
 
-        model_module = TftModelModule(self.loss)
+        model_module = TftModelModule(self.model_id, self.loss)
 
         self._load_model(model_module, train_dataset)
 
@@ -42,7 +42,7 @@ class ExperimentalOrchestration(Orchestration):
         inference_data_module = InferenceDataModule(self.symbols, self.features, self.time_frame, 
                                                      self.max_lookback_period, self.max_prediction_length)
 
-        model_module = TftModelModule(self.loss)
+        model_module = TftModelModule(self.model_id, self.loss)
 
         # TODO: Sometimes when models are trained on different hardware, loading in the model this way doesn't work.
         model_module.load_model_from_checkpoint(self.model_id, self.accelerator)
@@ -69,7 +69,7 @@ class ExperimentalOrchestration(Orchestration):
         if self.config['devices'] > 1:
             training_data_module.cache_df()
 
-        model_module = TftModelModule(self.loss)
+        model_module = TftModelModule(self.model_id, self.loss)
 
         model_module.find_optimal_hyperparameters(train_dataloader, val_dataloader)
 
@@ -84,7 +84,7 @@ class ExperimentalOrchestration(Orchestration):
         if self.config['devices'] > 1:
             training_data_module.cache_df()
 
-        model_module = TftModelModule(self.loss)
+        model_module = TftModelModule(self.model_id, self.loss)
 
         self._load_model(model_module, train_dataset)
 
@@ -106,7 +106,7 @@ class ExperimentalOrchestration(Orchestration):
         test_datasets = training_data_module.construct_test_datasets(train_dataset, self.train_start, self.val_end, self.test_end)
         test_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
 
-        model_module = TftModelModule(self.loss)
+        model_module = TftModelModule(self.model_id, self.loss)
 
         self._load_model(model_module, train_dataset)
 

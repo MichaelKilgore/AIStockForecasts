@@ -16,7 +16,7 @@ def run_evaluation(self):
         raise Exception(f'model type: {self.model_type} not supported')
 
 def _tft_run_evaluation(self):
-    model_module = TftModelModule(self.loss)
+    model_module = TftModelModule(self.model_id, self.loss)
 
     try:
         predictionsDF = model_module.load_human_readable_predictions(self.model_id)

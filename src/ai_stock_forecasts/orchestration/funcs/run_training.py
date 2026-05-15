@@ -32,7 +32,7 @@ def _tft_run_training(self):
     if self.config['devices'] > 1:
         training_data_module.cache_df()
 
-    model_module = TftModelModule(self.loss)
+    model_module = TftModelModule(self.model_id, self.loss)
 
     if self.fine_tuning_model_id:
         self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)

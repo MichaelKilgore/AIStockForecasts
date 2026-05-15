@@ -34,7 +34,7 @@ def _tft_run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
 
     test_dataloaders = training_data_module.construct_test_dataloaders(test_datasets, self.batch_size, self.num_workers, self.use_gpu)
 
-    model_module = TftModelModule(self.loss)
+    model_module = TftModelModule(self.model_id, self.loss)
 
     self._load_model(model_module, train_dataset, load_last_ckpt=load_last_ckpt)
 

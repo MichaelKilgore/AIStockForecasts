@@ -243,7 +243,7 @@ class Orchestration:
                 )
 
         # execute trading strategy
-        model_module = TftModelModule(self.loss)
+        model_module = TftModelModule(self.model_id, self.loss)
 
         with self.s3_util.load_best_model_checkpoint(self.base_model_id, pull_last_ckpt=self.pull_last_ckpt) as ckpt_path:
             with Timer(name='execute_buy.torch.load_checkpoint', text='{name} took {seconds:.2f}s', logger=logging.info):
@@ -312,7 +312,7 @@ class Orchestration:
         logging.info("are you sure you meant to run checkpoint upload? Enter 'y' to continue: ")
         ans = input()
         if ans == "y":
-            model_module = TftModelModule(self.loss)
+            model_module = TftModelModule(self.model_id, self.loss)
 
             model_module.upload_checkpoints_to_s3(self.model_id)
         else:
@@ -387,14 +387,14 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-even-more-recent-training')
-    parser.add_argument('--run_training', type=_str2bool, default=False)
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-long-training')
+    parser.add_argument('--run_training', type=_str2bool, default=True)
     parser.add_argument('--resume_from_last_ckpt', type=_str2bool, default=False)
     parser.add_argument('--run_batch_inference', type=_str2bool, default=False)
     parser.add_argument('--run_evaluation', type=_str2bool, default=False)
 
-    parser.add_argument('--execute_buy', type=_str2bool, default=True)
-    parser.add_argument('--testing', type=_str2bool, default=True)
+    parser.add_argument('--execute_buy', type=_str2bool, default=False)
+    parser.add_argument('--testing', type=_str2bool, default=False)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=_str2bool, default=False)

@@ -56,11 +56,11 @@ class StepPrint(Callback):
 
 
 class TftModelModule:
-    def __init__(self, loss=QuantileLoss(quantiles=[0.3, 0.5, 0.7])):
+    def __init__(self, model_id: str, loss=QuantileLoss(quantiles=[0.3, 0.5, 0.7])):
         self.s3_util = S3ParquetUtil()
 
         self.model_dir = os.environ.get("SM_MODEL_DIR", "/opt/ml/model")
-        self.ckpt_dir = os.path.join(self.model_dir, "checkpoints")
+        self.ckpt_dir = os.path.join(self.model_dir, f"checkpoints_{model_id}")
 
         self.model = None
         self._construct_loss(loss)
