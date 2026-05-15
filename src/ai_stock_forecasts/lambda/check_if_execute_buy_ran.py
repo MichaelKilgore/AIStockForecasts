@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from boto3.dynamodb.conditions import Key
 
@@ -14,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 def lambda_handler(event: dict, context: Any) -> dict:
     model_id = event['model_id']
     date_override = event.get('date')
-    today_prefix = date_override if date_override else datetime.now().strftime('%Y-%m-%d')
+    today_prefix = date_override if date_override else datetime.now(ZoneInfo('America/New_York')).strftime('%Y-%m-%d')
 
     db_util = DynamoDBUtil()
     telegram = TelegramBotUtil()
