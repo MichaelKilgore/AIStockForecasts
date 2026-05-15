@@ -20,6 +20,7 @@ import pandas as pd
 from pandas import DataFrame
 
 from ai_stock_forecasts.utils.s3_util import S3ParquetUtil
+from codetiming import Timer
 from lightning_utilities.core.rank_zero import rank_zero_only
 import logging
 
@@ -242,6 +243,7 @@ class TftModelModule:
             y=y_combined
         )
 
+    @Timer(name='TftModelModule.run_single_day_inference', text='{name} took {seconds:.2f}s', logger=logging.info)
     def run_single_day_inference(self, dataloader: DataLoader, df: DataFrame) -> DataFrame:
         if not isinstance(self.model, TemporalFusionTransformer):
             raise Exception('must load in model before loading predictions')
@@ -318,6 +320,7 @@ class TftModelModule:
         return predictionsDF
 
 
+    @Timer(name='TftModelModule.append_actuals_to_simple_predictions', text='{name} took {seconds:.2f}s', logger=logging.info)
     def append_actuals_to_simple_predictions(self, predictionsDF: DataFrame, df: DataFrame) -> DataFrame:
         # time_idx, timestamp, symbol, feature_a, feature_b, ...
         return predictionsDF.merge(df, on=['symbol', 'timestamp'], how='inner')

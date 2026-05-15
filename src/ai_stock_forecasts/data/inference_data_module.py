@@ -7,6 +7,7 @@ import holidays
 import numpy as np
 import pandas as pd
 from alpaca.data import TimeFrame, TimeFrameUnit
+from codetiming import Timer
 from pandas import DataFrame, factorize, to_numeric
 from pytorch_forecasting import TimeSeriesDataSet
 from torch.utils.data import DataLoader
@@ -38,6 +39,7 @@ class InferenceDataModule(DataModule):
         self.volume_filter = volume_filter
         super().__init__(symbols, features, time_frame, max_lookback_period, max_prediction_length, target=target)
 
+    @Timer(name='InferenceDataModule._construct_df', text='{name} took {seconds:.2f}s', logger=logging.info)
     def _construct_df(self):
         if not (self.time_frame.amount_value == 1 and self.time_frame.unit_value == TimeFrameUnit.Day):
             raise Exception(f'The time_frame: {self.time_frame} is not supported')

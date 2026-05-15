@@ -22,6 +22,7 @@ from ai_stock_forecasts.data.training_data_module import TrainingDataModule
 from ai_stock_forecasts.models.order import Order, OrderItem
 
 from alpaca.trading.enums import OrderSide
+from codetiming import Timer
 
 from ai_stock_forecasts.ordering.order_util import OrderUtil
 from ai_stock_forecasts.utils.postgres_util import PostgresUtil
@@ -199,7 +200,7 @@ class Orchestration:
         self._assert_not_variant('run_evaluation')
         run_evaluation(self)
 
-    ''' Setting testing to true skips db upload and actually execute sell / buy in alpaca.'''
+    ''' Setting testing to true skips db upload and actually execute sell / buy in alpaca / psql.'''
     def execute_buy(self, testing: bool=False):
 
         curr_day = get_prev_market_open_day()
@@ -245,7 +246,8 @@ class Orchestration:
         model_module = TftModelModule(self.loss)
 
         with self.s3_util.load_best_model_checkpoint(self.base_model_id, pull_last_ckpt=self.pull_last_ckpt) as ckpt_path:
-            ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
+            with Timer(name='execute_buy.torch.load_checkpoint', text='{name} took {seconds:.2f}s', logger=logging.info):
+                ckpt = torch.load(ckpt_path, map_location=self.accelerator, weights_only=False)
             hp = ckpt["hyper_parameters"]
             params = hp["dataset_parameters"]
         params["min_prediction_idx"] = None
@@ -253,11 +255,12 @@ class Orchestration:
         inf_dataset = inference_data_module.construct_inference_dataset(params)
         inf_dataloader = inference_data_module.construct_inference_dataloader(inf_dataset, self.batch_size, self.num_workers, self.use_gpu)
 
-        model_module.load_model_from_checkpoint_and_data(self.base_model_id, self.accelerator,
-                                                          inf_dataset, self.learning_rate,
-                                                          self.hidden_size, self.attention_head_size,
-                                                          self.dropout, self.hidden_continuous_size,
-                                                          self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=self.pull_last_ckpt)
+        with Timer(name='execute_buy.load_model_from_checkpoint_and_data', text='{name} took {seconds:.2f}s', logger=logging.info):
+            model_module.load_model_from_checkpoint_and_data(self.base_model_id, self.accelerator,
+                                                              inf_dataset, self.learning_rate,
+                                                              self.hidden_size, self.attention_head_size,
+                                                              self.dropout, self.hidden_continuous_size,
+                                                              self.lstm_layers, self.reduce_on_plateau_patience, load_last_ckpt=self.pull_last_ckpt)
 
         predictionsDF = model_module.run_single_day_inference(inf_dataloader, inference_data_module.df)
 
@@ -384,14 +387,14 @@ def parse_args():
 
     parser.add_argument('--symbols_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/symbols.txt')
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
-    parser.add_argument('--model_id', type=str, default='ubuntu-with-long-training')
-    parser.add_argument('--run_training', type=_str2bool, default=True)
+    parser.add_argument('--model_id', type=str, default='ubuntu-with-even-more-recent-training')
+    parser.add_argument('--run_training', type=_str2bool, default=False)
     parser.add_argument('--resume_from_last_ckpt', type=_str2bool, default=False)
     parser.add_argument('--run_batch_inference', type=_str2bool, default=False)
     parser.add_argument('--run_evaluation', type=_str2bool, default=False)
 
-    parser.add_argument('--execute_buy', type=_str2bool, default=False)
-    parser.add_argument('--testing', type=_str2bool, default=False)
+    parser.add_argument('--execute_buy', type=_str2bool, default=True)
+    parser.add_argument('--testing', type=_str2bool, default=True)
 
     # run_trainer uploads the checkpoints when complete. this function is useful for if we cancel training early we can still upload the models checkpoints to s3.
     parser.add_argument('--run_checkpoint_upload', type=_str2bool, default=False)

@@ -1,7 +1,9 @@
+import logging
 from typing import DefaultDict, Optional
 from pandas import DataFrame
 import numpy as np
 import pandas as pd
+from codetiming import Timer
 from scipy.stats import norm
 from collections import defaultdict
 
@@ -65,6 +67,7 @@ class SimpleXDaysAheadBuying(BaseTradingModule):
             "y_pred_p50": [ [ ], [ ]... ],
             "y_pred_p70": [ [ ], [ ]... ],
     """
+    @Timer(name='SimpleXDaysAheadBuying.generate_buy_list', text='{name} took {seconds:.2f}s', logger=logging.info)
     def generate_buy_list(self, predictions: DataFrame) -> DataFrame:
         top_x = self._determine_top_x(predictions)
 

@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+from codetiming import Timer
 from datetime import timedelta
 from ai_stock_forecasts.models.day_of_week import DayOfWeek
 from ai_stock_forecasts.trading_algorithms.base_trading_module import BaseTradingModule
@@ -19,6 +20,7 @@ class VolatilityRanking(BaseTradingModule):
         logging.info(f'set trading params to: num_stocks_purchased: {self.num_stocks_purchased}, day_of_week: {self.day_of_week}, volatility_importance: {self.volatility_importance}')
 
 
+    @Timer(name='VolatilityRanking.generate_buy_list', text='{name} took {seconds:.2f}s', logger=logging.info)
     def generate_buy_list(self, predictions: pd.DataFrame) -> pd.DataFrame:
         top_x = self._determine_top_x(predictions)
 
