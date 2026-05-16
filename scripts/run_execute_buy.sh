@@ -20,7 +20,7 @@ MODEL_ID="ubuntu-with-even-more-recent-training"
 # treat the schedule as daily (last slot = today's SCHEDULE_HOUR if past, else
 # yesterday's).
 SCHEDULE_DOW=3        # Wednesday
-SCHEDULE_HOUR=17      # 5 PM, system local time (America/Chicago)
+SCHEDULE_HOUR=16      # 4 PM slot (cron fires at 16:30, system local time America/Chicago)
 MAX_LATENESS=$((24 * 3600))
 
 now_epoch=$(date +%s)
