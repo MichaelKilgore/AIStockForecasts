@@ -1,3 +1,4 @@
+import logging
 import os
 
 import torch
@@ -35,8 +36,12 @@ def _tft_run_training(self):
     model_module = TftModelModule(self.model_id, self.loss)
 
     if self.fine_tuning_model_id:
+        logging.info(f'running fine tuning for fine tuning with model_id: {self.model_id} and fine tuning model id: {self.fine_tuning_model_id}')
+
         self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
     elif self.resume_from_last_ckpt:
+        logging.info(f"resuming training from last ckpt stored locally for: {self.model_id}")
+
         ckpt_path = os.path.join(model_module.ckpt_dir, 'last.ckpt')
         if not os.path.exists(ckpt_path):
             raise FileNotFoundError(f'resume_from_last_ckpt set but no checkpoint found at {ckpt_path}')
