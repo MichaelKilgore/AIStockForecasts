@@ -1,9 +1,6 @@
 import logging
 import os
 
-import torch
-from pytorch_forecasting import TemporalFusionTransformer
-
 from ai_stock_forecasts.data.training_data_module import TrainingDataModule
 from ai_stock_forecasts.model.lgbm_model_module import LgbmModelModule
 from ai_stock_forecasts.model.tft_model_module import TftModelModule
@@ -35,27 +32,23 @@ def _tft_run_training(self):
 
     model_module = TftModelModule(self.model_id, self.loss)
 
+    resume_ckpt_path = None
     if self.fine_tuning_model_id:
         logging.info(f'running fine tuning for fine tuning with model_id: {self.model_id} and fine tuning model id: {self.fine_tuning_model_id}')
 
         self._load_model(model_module, train_dataset, self.fine_tuning_model_id, modify_dropout=True, load_last_ckpt=True)
     elif self.resume_from_last_ckpt:
-        logging.info(f"resuming training from last ckpt stored locally for: {self.model_id}")
-
-        ckpt_path = os.path.join(model_module.ckpt_dir, 'last.ckpt')
-        if not os.path.exists(ckpt_path):
-            raise FileNotFoundError(f'resume_from_last_ckpt set but no checkpoint found at {ckpt_path}')
-        model_module.model = TemporalFusionTransformer.load_from_checkpoint(
-            ckpt_path,
-            map_location=torch.device(self.accelerator),
-            weights_only=False,
-        )
+        resume_ckpt_path = os.path.join(model_module.ckpt_dir, 'last.ckpt')
+        if not os.path.exists(resume_ckpt_path):
+            raise FileNotFoundError(f'resume_from_last_ckpt set but no checkpoint found at {resume_ckpt_path}')
+        logging.info(f"resuming training from {resume_ckpt_path}")
 
     model_module.run_training(train_dataset, self.learning_rate, self.hidden_size,
                                self.attention_head_size, self.dropout, self.hidden_continuous_size,
                                self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
                                self.accelerator, self.devices, train_dataloader,
-                               val_dataloader, self.gradient_clip_val)
+                               val_dataloader, self.gradient_clip_val,
+                               ckpt_path=resume_ckpt_path)
 
     model_module.upload_checkpoints_to_s3(self.model_id)
 

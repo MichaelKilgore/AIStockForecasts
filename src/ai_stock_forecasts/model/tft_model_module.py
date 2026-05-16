@@ -107,7 +107,8 @@ class TftModelModule:
                      reduce_on_plateau_patience: int, max_epochs: int,
                      accelerator: str, devices: int,
                      train_dataloader: DataLoader, val_dataloader: Union[DataLoader, None],
-                     gradient_clip_val: Union[None, float]):
+                     gradient_clip_val: Union[None, float],
+                     ckpt_path: Union[str, None] = None):
 
 
         if (not isinstance(self.model, TemporalFusionTransformer)):
@@ -142,7 +143,8 @@ class TftModelModule:
             logger=False,
         )
 
-        self.trainer.fit(self.model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+        fit_kwargs = {"weights_only": False} if ckpt_path is not None else {}
+        self.trainer.fit(self.model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader, ckpt_path=ckpt_path, **fit_kwargs)
 
     @rank_zero_only
     def save_checkpoint(self):

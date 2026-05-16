@@ -389,7 +389,7 @@ def parse_args():
     parser.add_argument('--config_path', type=str, default='/home/michael/Coding/AIStockForecasts/src/ai_stock_forecasts/constants/configs.yaml')
     parser.add_argument('--model_id', type=str, default='ubuntu-with-long-training')
     parser.add_argument('--run_training', type=_str2bool, default=True)
-    parser.add_argument('--resume_from_last_ckpt', type=_str2bool, default=False)
+    parser.add_argument('--resume_from_last_ckpt', type=_str2bool, default=True)
     parser.add_argument('--run_batch_inference', type=_str2bool, default=False)
     parser.add_argument('--run_evaluation', type=_str2bool, default=False)
 
