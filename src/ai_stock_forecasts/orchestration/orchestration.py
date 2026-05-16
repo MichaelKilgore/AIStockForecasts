@@ -187,9 +187,10 @@ class Orchestration:
                 f'(variant_of={self.base_model_id}). Run this stage against the base model.'
             )
 
-    def run_training(self, resume_from_last_ckpt: bool = False):
+    def run_training(self, resume_from_last_ckpt: bool = False, max_hours_run: float = None):
         self._assert_not_variant('run_training')
         self.resume_from_last_ckpt = resume_from_last_ckpt
+        self.max_hours_run = max_hours_run
         run_training(self)
 
     def run_batch_inference(self, save_predictions=True, load_last_ckpt=False):
@@ -390,6 +391,8 @@ def parse_args():
     parser.add_argument('--model_id', type=str, default='ubuntu-with-long-training')
     parser.add_argument('--run_training', type=_str2bool, default=True)
     parser.add_argument('--resume_from_last_ckpt', type=_str2bool, default=True)
+    parser.add_argument('--max_hours_run', type=float, default=None,
+                        help='Wall-clock cap (hours) for training. If unset, no time limit.')
     parser.add_argument('--run_batch_inference', type=_str2bool, default=False)
     parser.add_argument('--run_evaluation', type=_str2bool, default=False)
 
@@ -424,7 +427,7 @@ def main():
     orc = Orchestration(symbols, args.model_id, args.config_path)
 
     if args.run_training:
-        orc.run_training(args.resume_from_last_ckpt)
+        orc.run_training(args.resume_from_last_ckpt, args.max_hours_run)
     if args.run_batch_inference:
         orc.run_batch_inference(save_predictions=True, load_last_ckpt=True)
     if args.run_evaluation:

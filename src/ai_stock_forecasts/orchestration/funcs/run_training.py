@@ -48,7 +48,8 @@ def _tft_run_training(self):
                                self.lstm_layers, self.reduce_on_plateau_patience, self.max_epochs,
                                self.accelerator, self.devices, train_dataloader,
                                val_dataloader, self.gradient_clip_val,
-                               ckpt_path=resume_ckpt_path)
+                               ckpt_path=resume_ckpt_path,
+                               max_hours_run=getattr(self, 'max_hours_run', None))
 
     model_module.upload_checkpoints_to_s3(self.model_id)
 

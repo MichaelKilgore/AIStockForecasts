@@ -1,5 +1,6 @@
 
 import os
+from datetime import timedelta
 from typing import Union
 from lightning.pytorch import Callback, Trainer
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
@@ -108,7 +109,8 @@ class TftModelModule:
                      accelerator: str, devices: int,
                      train_dataloader: DataLoader, val_dataloader: Union[DataLoader, None],
                      gradient_clip_val: Union[None, float],
-                     ckpt_path: Union[str, None] = None):
+                     ckpt_path: Union[str, None] = None,
+                     max_hours_run: Union[float, None] = None):
 
 
         if (not isinstance(self.model, TemporalFusionTransformer)):
@@ -133,7 +135,7 @@ class TftModelModule:
             cb for cb in self.callbacks if cb is not self.ckpt_best_callback
         ]
 
-        self.trainer = Trainer(
+        trainer_kwargs = dict(
             max_epochs=max_epochs,
             accelerator=accelerator,
             devices=devices,
@@ -142,6 +144,10 @@ class TftModelModule:
             gradient_clip_val=gradient_clip_val,
             logger=False,
         )
+        if max_hours_run is not None:
+            trainer_kwargs["max_time"] = timedelta(hours=max_hours_run)
+
+        self.trainer = Trainer(**trainer_kwargs)
 
         fit_kwargs = {"weights_only": False} if ckpt_path is not None else {}
         self.trainer.fit(self.model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader, ckpt_path=ckpt_path, **fit_kwargs)
