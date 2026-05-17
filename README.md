@@ -1,4 +1,4 @@
-## HLD
+## AI Stock Forecasts
 
 ### Dictionary
 
@@ -8,7 +8,7 @@
 - Feature Backfill: Pulls raw historical stock bars from the data provider for a given list of symbols and date range, derives the configured feature set, and uploads the result to S3 so training and inference can read features without re-hitting the upstream API.
 - Execute Buy: execute buy is the main live trading simulation setup, this is used to simulate a model trading. For example you could be running a trading strategy that involves buying some set of stocks every wednesday. For that example you would run execute buy every wednesday, and that particular models trade decisions would get logged in transactions psql table and dynamodb.
 
-### Training / Batch Inference / Evaluation / Feature Backfill
+### Training / Batch Inference / Evaluation / Feature Backfill HLD
 
 <div style="padding: 20px;">
   <img src="images/hld_simple.png">
@@ -24,7 +24,7 @@ The primary reason for this is that the amount of storage this data takes is qui
 
 On the other hand training via sage maker is very expensive, I actually initially started this project using sagemaker but the cost was just way to high and I already had a 3070 ti and 4070 ti so I decided to use that instead. That being said, AWS definitely isn't the most cost efficient solution and I could probably find a much cheaper solution but I think I prefer to just run training locally, and long term things like price changes from these cloud providers isn't something I need to worry about.
 
-### execute buy workflow
+### execute buy workflow HLD
 
 <div style="padding: 20px;">
   <img src="images/execute_buy.png">
@@ -57,4 +57,4 @@ The purpose of this script is to pre-pull all the necessary raw data from our ex
 
 1. 'Orchestration' is the entry point for training, batch inference, evaluation, and execute_buy
 2. 'BackfillFeaturesUtil' is the main util used for backfilling features data to s3 for training.
-3. 'ModelPerformanceVisualizer' is what we use to compare different models performance3. 'ModelPerformanceVisualizer' is what we use to compare different models performance3. 'ModelPerformanceVisualizer' is what we use to compare different models performance
+3. 'ModelPerformanceVisualizer' is what we use to compare different models performance3.
