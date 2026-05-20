@@ -3,7 +3,7 @@ import os
 from datetime import timedelta
 from typing import Union
 from lightning.pytorch import Callback, Trainer
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, Timer
 from pytorch_forecasting import EncoderNormalizer, QuantileLoss, TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.models.base import Prediction
 from pytorch_forecasting.models.temporal_fusion_transformer.tuning import optimize_hyperparameters
@@ -32,6 +32,14 @@ if torch.cuda.is_available():
 """
     Provides helpful logging.
 """
+class FreshTimer(Timer):
+    # Each resumed run gets a fresh wall-clock budget; without this the elapsed
+    # time is restored from the checkpoint and an already-exhausted timer
+    # signals stop before the first batch.
+    def load_state_dict(self, state_dict):
+        return
+
+
 class StepPrint(Callback):
     def __init__(self, every=50): self.every = every
     def on_train_epoch_end(self, trainer, pl_module):
@@ -135,6 +143,9 @@ class TftModelModule:
             cb for cb in self.callbacks if cb is not self.ckpt_best_callback
         ]
 
+        if max_hours_run is not None:
+            callbacks = callbacks + [FreshTimer(duration=timedelta(hours=max_hours_run))]
+
         trainer_kwargs = dict(
             max_epochs=max_epochs,
             accelerator=accelerator,
@@ -144,8 +155,6 @@ class TftModelModule:
             gradient_clip_val=gradient_clip_val,
             logger=False,
         )
-        if max_hours_run is not None:
-            trainer_kwargs["max_time"] = timedelta(hours=max_hours_run)
 
         self.trainer = Trainer(**trainer_kwargs)
 
