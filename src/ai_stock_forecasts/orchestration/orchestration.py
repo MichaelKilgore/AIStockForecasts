@@ -233,7 +233,6 @@ class Orchestration:
                 for stock in self.yfinance_util.get_current_prices([oi.symbol for oi in order_items])
             }
             for oi in order_items:
-                break
                 self.postgres_util.add_transaction(
                     model_id=self.model_id,
                     symbol=oi.symbol,
