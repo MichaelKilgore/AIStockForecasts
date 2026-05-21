@@ -3,7 +3,7 @@ import os
 from datetime import timedelta
 from typing import Union
 from lightning.pytorch import Callback, Trainer
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, Timer
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, Timer as LightningTimer
 from pytorch_forecasting import EncoderNormalizer, QuantileLoss, TemporalFusionTransformer, TimeSeriesDataSet
 from pytorch_forecasting.models.base import Prediction
 from pytorch_forecasting.models.temporal_fusion_transformer.tuning import optimize_hyperparameters
@@ -32,7 +32,7 @@ if torch.cuda.is_available():
 """
     Provides helpful logging.
 """
-class FreshTimer(Timer):
+class FreshTimer(LightningTimer):
     # Each resumed run gets a fresh wall-clock budget; without this the elapsed
     # time is restored from the checkpoint and an already-exhausted timer
     # signals stop before the first batch.
